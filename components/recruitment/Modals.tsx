@@ -9,6 +9,7 @@ import {
 } from "lucide-react";
 import type { AppState, User, ImportJob } from "@/lib/domain";
 import { ROLE_LABELS } from "@/lib/domain";
+import CandidateIntake from "./CandidateIntake";
 import {
   type Action,
   type ModalState,
@@ -273,61 +274,49 @@ export default function Modals({
         </Form>
       </Modal>
     );
-  if (modal.kind === "candidate" || modal.kind === "editCandidate")
+  if (modal.kind === "candidate")
+    return (
+      <CandidateIntake
+        state={state}
+        user={user}
+        onAction={onAction}
+        onClose={onClose}
+        defaultJobId={modal.jobId}
+      />
+    );
+  if (modal.kind === "editCandidate")
     return (
       <Modal
-        title={modal.kind === "candidate" ? "添加候选人" : "编辑候选人资料"}
-        subtitle={
-          modal.kind === "candidate"
-            ? "候选人资料与投递记录将一起创建。"
-            : "更新主资料；已有投递保留当时的简历快照。"
-        }
+        title="编辑候选人资料"
+        subtitle="更新主资料；已有投递保留当时的简历快照。"
         onClose={onClose}
         wide
       >
         <Form
           onClose={onClose}
-          submit={modal.kind === "candidate" ? "创建投递" : "保存资料"}
+          submit="保存资料"
           onSubmit={(d) => {
             if (!text(d, "email") && !text(d, "phone"))
               throw new Error("邮箱与手机号至少填写一种，请补充可用联系方式。");
-            return onAction(
-              modal.kind === "candidate"
-                ? "createCandidate"
-                : "updateCandidate",
-              {
-                candidateId: candidate?.id,
-                jobId: text(d, "jobId"),
-                name: text(d, "name"),
-                email: text(d, "email"),
-                phone: text(d, "phone"),
-                school: text(d, "school"),
-                education: text(d, "education"),
-                major: text(d, "major"),
-                graduationYear: text(d, "graduationYear")
-                  ? Number(d.get("graduationYear"))
-                  : null,
-                skills: csvList(d, "skills"),
-                resume: text(d, "resume"),
-                availability: text(d, "availability"),
-                source: text(d, "source"),
-              },
-            );
+            return onAction("updateCandidate", {
+              candidateId: candidate?.id,
+              jobId: text(d, "jobId"),
+              name: text(d, "name"),
+              email: text(d, "email"),
+              phone: text(d, "phone"),
+              school: text(d, "school"),
+              education: text(d, "education"),
+              major: text(d, "major"),
+              graduationYear: text(d, "graduationYear")
+                ? Number(d.get("graduationYear"))
+                : null,
+              skills: csvList(d, "skills"),
+              resume: text(d, "resume"),
+              availability: text(d, "availability"),
+              source: text(d, "source"),
+            });
           }}
         >
-          {modal.kind === "candidate" && (
-            <Field label="投递职位" required span>
-              <select name="jobId" required defaultValue={modal.jobId}>
-                {state.jobs
-                  .filter((j) => j.status === "open")
-                  .map((j) => (
-                    <option key={j.id} value={j.id}>
-                      {j.title} · {j.type === "campus" ? "校招" : "社招"}
-                    </option>
-                  ))}
-              </select>
-            </Field>
-          )}
           <Field label="姓名" required>
             <input
               name="name"

@@ -1,0 +1,429 @@
+/* Hallmark · component: candidate intake · genre: modern-minimal · theme: Cobalt
+ * states: default hover focus active disabled loading error success */
+.modal:has(.intake) {
+  margin: auto;
+}
+.intake {
+  min-width: 0;
+}
+.intake .button {
+  min-height: 44px;
+}
+.intake :is(button, a, input, select, textarea):focus-visible {
+  outline: 2px solid var(--primary);
+  outline-offset: 2px;
+}
+.intake-steps {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 16px;
+  margin-bottom: 20px;
+  color: var(--color-sub);
+  font-size: 11px;
+}
+.intake-steps > span {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  white-space: nowrap;
+}
+.intake-steps b {
+  display: grid;
+  place-items: center;
+  width: 23px;
+  height: 23px;
+  background: var(--background);
+  border: 1px solid var(--border);
+  border-radius: 50%;
+  font-size: 10px;
+  font-weight: 600;
+}
+.intake-steps .active {
+  color: var(--primary);
+  font-weight: 550;
+}
+.intake-steps .active b {
+  color: var(--primary-foreground);
+  background: var(--primary);
+  border-color: var(--primary);
+}
+.intake-upload {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 9px;
+  border: 1px dashed var(--color-blue-border);
+  border-radius: 9px;
+  background: var(--color-blue-soft);
+  padding: 24px 18px;
+  cursor: pointer;
+  text-align: center;
+  min-height: 154px;
+}
+.intake-upload:hover,
+.intake-upload.dragging {
+  border-color: var(--primary);
+}
+.intake-upload.dragging {
+  outline: 2px solid var(--primary);
+  outline-offset: 2px;
+}
+.intake-upload[aria-disabled="true"] {
+  cursor: not-allowed;
+  opacity: 0.6;
+}
+.intake-upload-icon {
+  display: grid;
+  place-items: center;
+  width: 43px;
+  height: 43px;
+  border: 1px solid var(--color-blue-border);
+  background: var(--card);
+  color: var(--primary);
+  border-radius: 10px;
+}
+.intake-upload > .spin {
+  color: var(--primary);
+  width: 25px;
+  height: 25px;
+  margin: 7px;
+}
+.intake-upload strong {
+  color: var(--color-ink);
+  font-size: 12px;
+  font-weight: 550;
+  max-width: 100%;
+  overflow-wrap: anywhere;
+}
+.intake-upload > span:last-of-type {
+  font-size: 10px;
+  color: var(--color-sub);
+  line-height: 1.8;
+}
+.intake-parse-error {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+  color: var(--color-red);
+  background: var(--color-red-soft);
+  border-radius: 7px;
+  padding: 12px 13px;
+  font-size: 11px;
+  line-height: 1.8;
+  margin-top: 12px;
+}
+.intake-parse-error > svg {
+  flex: none;
+  margin-top: 3px;
+}
+.intake-parse-error > span {
+  flex: 1;
+}
+.intake-parse-error button {
+  display: grid;
+  place-items: center;
+  border: 0;
+  background: transparent;
+  width: 25px;
+  height: 25px;
+  flex: none;
+  color: var(--color-red);
+}
+.intake-recognition {
+  margin-top: 13px;
+  padding: 14px 16px;
+  background: var(--background);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+}
+.intake-recognition-title {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+  color: var(--primary);
+}
+.intake-recognition-title strong {
+  font-size: 11px;
+  font-weight: 550;
+  color: var(--color-ink);
+}
+.intake-recognition p {
+  color: var(--color-sub);
+  font-size: 10px;
+  line-height: 1.8;
+  margin-top: 7px;
+}
+.intake-recognition ul {
+  padding-left: 17px;
+  margin: 7px 0 0;
+  color: var(--color-sub);
+  font-size: 10px;
+  line-height: 1.9;
+}
+.intake-recognition > .text-button {
+  font-size: 10px;
+  margin-top: 5px;
+  min-height: 35px;
+}
+.intake-replace-confirm {
+  margin-top: 8px;
+  border-top: 1px solid var(--border);
+  padding-top: 5px;
+}
+.intake-replace-confirm > div {
+  display: flex;
+  justify-content: flex-end;
+  gap: 9px;
+  margin-top: 11px;
+}
+.intake-replace-confirm .button {
+  font-size: 10px;
+}
+.intake-form-title {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  border-top: 1px solid var(--border);
+  margin-top: 23px;
+  padding-top: 20px;
+  margin-bottom: 17px;
+  color: var(--primary);
+}
+.intake-form-title h3 {
+  color: var(--color-ink);
+  font-size: 13px;
+  font-weight: 600;
+}
+.intake-form-title span {
+  font-size: 10px;
+  color: var(--color-sub);
+  margin-left: auto;
+}
+.intake .field small {
+  overflow-wrap: anywhere;
+  white-space: pre-wrap;
+  max-height: 78px;
+  overflow-y: auto;
+  line-height: 1.7;
+}
+.intake .field input,
+.intake .field select {
+  min-height: 44px;
+}
+.intake .field textarea {
+  width: 100%;
+}
+.intake .field input:disabled,
+.intake .field select:disabled,
+.intake .field textarea:disabled {
+  opacity: 0.65;
+  cursor: not-allowed;
+}
+.intake-invite-option {
+  border: 1px solid var(--color-blue-border);
+  background: var(--color-blue-soft);
+  border-radius: 8px;
+  margin-top: 21px;
+  padding: 14px 15px;
+}
+.intake-invite-option > label {
+  display: flex;
+  gap: 10px;
+  align-items: flex-start;
+  cursor: pointer;
+}
+.intake-invite-option input {
+  margin: 4px 0 0;
+  width: 14px;
+  height: 14px;
+  accent-color: var(--primary);
+}
+.intake-invite-option strong {
+  display: block;
+  font-size: 11px;
+  font-weight: 550;
+  color: var(--color-ink);
+}
+.intake-invite-option small {
+  font-size: 10px;
+  color: var(--color-sub);
+  display: block;
+  line-height: 1.8;
+  margin-top: 4px;
+}
+.intake-privacy {
+  display: flex;
+  align-items: flex-start;
+  gap: 6px;
+  color: var(--color-sub);
+  font-size: 10px;
+  line-height: 1.8;
+  margin-top: 12px;
+}
+.intake-privacy svg {
+  flex: none;
+  margin-top: 3px;
+}
+.intake-created {
+  display: flex;
+  align-items: center;
+  gap: 13px;
+  padding: 17px;
+  background: var(--color-green-soft);
+  color: var(--color-green);
+  border-radius: 9px;
+}
+.intake-created > div {
+  flex: 1;
+  min-width: 0;
+}
+.intake-created h3 {
+  font-size: 13px;
+  font-weight: 600;
+}
+.intake-created p {
+  font-size: 10px;
+  color: var(--color-sub);
+  line-height: 1.8;
+  margin-top: 5px;
+  overflow-wrap: anywhere;
+}
+.intake-success-body {
+  display: grid;
+  gap: 17px;
+}
+.intake-invite-state {
+  display: flex;
+  align-items: flex-start;
+  gap: 9px;
+  background: var(--background);
+  border: 1px solid var(--border);
+  border-radius: 7px;
+  padding: 14px;
+  color: var(--color-sub);
+}
+.intake-invite-state > svg {
+  flex: none;
+  margin-top: 2px;
+  color: var(--primary);
+}
+.intake-invite-state strong {
+  font-size: 11px;
+  font-weight: 550;
+  color: var(--color-ink);
+}
+.intake-invite-state p {
+  font-size: 10px;
+  line-height: 1.9;
+  margin-top: 5px;
+}
+.intake-mail {
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  overflow: clip;
+}
+.intake-mail > div {
+  display: flex;
+  align-items: baseline;
+  gap: 15px;
+  padding: 12px 15px;
+  border-bottom: 1px solid var(--border);
+}
+.intake-mail > div:last-child {
+  border-bottom: 0;
+}
+.intake-mail > div > span {
+  width: 58px;
+  flex: none;
+  font-size: 10px;
+  color: var(--color-sub);
+}
+.intake-mail strong {
+  font-size: 11px;
+  font-weight: 500;
+  overflow-wrap: anywhere;
+}
+.intake-mail > .intake-mail-text {
+  display: block;
+  background: var(--background);
+}
+.intake-mail-text pre {
+  font-family: var(--font-body);
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  font-size: 11px;
+  line-height: 1.9;
+  margin: 9px 0 0;
+  color: var(--color-sub);
+}
+.intake-link-actions {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: flex-start;
+  align-items: center;
+  gap: 9px;
+}
+.intake-gmail-note {
+  font-size: 10px;
+  line-height: 1.8;
+  color: var(--color-sub);
+}
+@media (max-width: 600px) {
+  .intake-steps {
+    gap: 7px;
+    font-size: 9px;
+    margin-bottom: 17px;
+  }
+  .intake-steps b {
+    width: 20px;
+    height: 20px;
+  }
+  .intake-steps > span {
+    gap: 5px;
+  }
+  .intake-steps > svg {
+    width: 10px;
+  }
+  .intake-upload {
+    padding: 20px 13px;
+  }
+  .intake-form-title {
+    flex-wrap: wrap;
+  }
+  .intake-form-title span {
+    margin-left: 0;
+    width: 100%;
+    padding-left: 25px;
+  }
+  .intake-created {
+    flex-wrap: wrap;
+    gap: 10px;
+  }
+  .intake-created > .badge {
+    margin-left: 40px;
+  }
+  .intake-mail > div {
+    gap: 9px;
+    padding-left: 12px;
+    padding-right: 12px;
+  }
+  .intake-mail > div > span {
+    width: 47px;
+  }
+  .intake-replace-confirm > div {
+    flex-direction: column;
+  }
+  .intake-link-actions > .button {
+    width: 100%;
+    justify-content: center;
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  .intake * {
+    transition: none !important;
+    animation: none !important;
+  }
+}

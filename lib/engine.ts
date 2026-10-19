@@ -9,6 +9,7 @@ import type {
 } from "./domain.ts";
 import { createSeed } from "./seed.ts";
 import { parseCsv } from "./csv.ts";
+import { CandidateReviewError, revokeCandidateReview } from "./candidate-review.ts";
 import {
   handleSelectionAction,
   SelectionError,
@@ -126,11 +127,13 @@ function restrictCandidate(candidate: Candidate): Candidate {
     resume: redactText(candidate.resume),
     availability: redactText(candidate.availability),
     restricted: true,
+    review: undefined,
   };
 }
 
 export function projectState(source: AppState, user: User): AppState {
   const state = structuredClone(source);
+  delete state.reviews;
   if (user.role === "admin")
     return {
       ...state,
@@ -383,6 +386,7 @@ export function applyAction(
       plannedJoinDate: "",
       joinedAt: "",
     };
+    delete app.snapshot.review;
     state.applications.push(app);
     event(app, "created", "", "new", `通过${app.source}创建投递`);
     return app;
@@ -1126,6 +1130,13 @@ export function applyAction(
       });
       break;
     }
+    case "createCandidateReview":
+      hr();
+      fail("REVIEW_ENDPOINT_REQUIRED", "请通过资料核对邀请接口生成安全链接");
+    case "revokeCandidateReview": {
+      try { return revokeCandidateReview(source, user, input, clock); }
+      catch (error) { if (error instanceof CandidateReviewError) throw new BusinessError(error.code, error.message, error.status); throw error; }
+    }
     case "anonymizeCandidate": {
       hr();
       const candidate =
@@ -1147,12 +1158,15 @@ export function applyAction(
           availability: "",
         });
       clear(candidate);
+      delete candidate.review;
+      state.reviews = state.reviews?.filter(review => review.candidateId !== candidate.id);
       const appIds = new Set<string>();
       state.applications
         .filter((app) => app.candidateId === candidate.id)
         .forEach((app) => {
           appIds.add(app.id);
           clear(app.snapshot);
+          delete app.snapshot.review;
           delete app.selection;
           app.screeningNote = "";
           app.decisionNote = "";

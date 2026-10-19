@@ -2,6 +2,15 @@ import { env } from "cloudflare:workers";
 import type { AppState, User } from "./domain.ts";
 import { applyAction, BusinessError, projectState } from "./engine.ts";
 import { createSeed, DEMO_USERS } from "./seed.ts";
+import {
+  CandidateReviewError,
+  CANDIDATE_REVIEW_DEMO_NOTICE,
+  createCandidateReview,
+  hashReviewToken,
+  newReviewToken,
+  readCandidateReview,
+  submitCandidateReview,
+} from "./candidate-review.ts";
 
 const COOKIE = "recruitment_session";
 const SESSION_MS = 12 * 60 * 60 * 1000;
@@ -192,6 +201,13 @@ export async function recruitmentAction(
   const user = (await getUser(request, true))!,
     current = await loadState();
   const next = applyAction(current, user, input);
+  await saveState(current, next);
+  return Response.json(
+    { user, state: projectState(next, user) },
+    { headers: { "cache-control": "no-store" } },
+  );
+}
+async function saveState(current: AppState, next: AppState) {
   const payload = JSON.stringify(next);
   if (new TextEncoder().encode(payload).length > 1900000)
     throw new BusinessError(
@@ -212,13 +228,102 @@ export async function recruitmentAction(
       "数据已被其他操作更新，请刷新后重试",
       409,
     );
+}
+const reviewHeaders = {
+  "cache-control": "no-store",
+  "referrer-policy": "no-referrer",
+  "x-content-type-options": "nosniff",
+};
+function reviewToken(value: unknown): string {
+  if (typeof value !== "string" || !/^[a-f0-9]{64}$/.test(value))
+    throw new CandidateReviewError(
+      "REVIEW_GONE",
+      "资料核对链接无效或已关闭，请联系招聘人员",
+      410,
+    );
+  return value;
+}
+export async function candidateReviewSnapshot(request: Request) {
+  const token = reviewToken(new URL(request.url).searchParams.get("token"));
   return Response.json(
-    { user, state: projectState(next, user) },
-    { headers: { "cache-control": "no-store" } },
+    readCandidateReview(await loadState(), await hashReviewToken(token)),
+    { headers: reviewHeaders },
+  );
+}
+export async function candidateReviewAction(
+  request: Request,
+  input: Record<string, unknown>,
+) {
+  checkOrigin(request);
+  if (
+    input.action === "createCandidateReview" ||
+    input.action === "revokeCandidateReview"
+  ) {
+    const user = (await getUser(request, true))!,
+      current = await loadState();
+    if (input.action === "revokeCandidateReview") {
+      const next = applyAction(current, user, input);
+      await saveState(current, next);
+      return Response.json(
+        { snapshot: { user, state: projectState(next, user) } },
+        { headers: reviewHeaders },
+      );
+    }
+    const { token, tokenHash } = await newReviewToken();
+    const created = createCandidateReview(current, user, input, tokenHash);
+    await saveState(current, created.state);
+    const app = created.state.applications.find(
+      (item) => item.id === input.applicationId,
+    )!;
+    const title = created.state.jobs.find(
+      (item) => item.id === app.jobId,
+    )!.title;
+    const reviewUrl = new URL("/candidate-review", request.url);
+    reviewUrl.searchParams.set("token", token);
+    const expiresLabel = new Intl.DateTimeFormat("zh-CN", {
+      timeZone: "Asia/Shanghai",
+      dateStyle: "long",
+      timeStyle: "short",
+    }).format(new Date(created.review.expiresAt));
+    const mailPreview = {
+      to: app.snapshot.email,
+      subject: `请核对您的招聘资料：${title}`,
+      text: `${app.snapshot.name}，您好：\n我们已根据您的简历整理了“${title}”岗位的应聘资料，请核对并补充需要更正的内容：\n${reviewUrl.href}\n有效期至 ${expiresLabel}（北京时间）。\n提交后招聘人员会继续核实和跟进，本次资料确认不会自动改变招聘结果。\n${CANDIDATE_REVIEW_DEMO_NOTICE}\n请勿转发此链接。`,
+      status: "preview",
+      reason: `${CANDIDATE_REVIEW_DEMO_NOTICE}系统仅生成邮件预览，未发送邮件。`,
+    };
+    return Response.json(
+      {
+        reviewUrl: reviewUrl.href,
+        review: { ...created.review, id: created.review.reviewId },
+        mailPreview,
+        snapshot: { user, state: projectState(created.state, user) },
+      },
+      { headers: reviewHeaders },
+    );
+  }
+  const token = reviewToken(input.token),
+    current = await loadState(),
+    tokenHash = await hashReviewToken(token);
+  const next = submitCandidateReview(current, tokenHash, input);
+  await saveState(current, next);
+  const review = next.reviews!.find((item) => item.tokenHash === tokenHash)!;
+  return Response.json(
+    {
+      review: {
+        id: review.id,
+        status: review.status,
+        version: review.version,
+        submittedAt: review.submittedAt,
+      },
+      message:
+        "资料已确认提交并锁定，招聘 HR 将继续人工复核；本操作不会自动推进招聘阶段。",
+    },
+    { headers: reviewHeaders },
   );
 }
 export function errorResponse(error: unknown) {
-  if (error instanceof BusinessError)
+  if (error instanceof BusinessError || error instanceof CandidateReviewError)
     return Response.json(
       { error: error.code, message: error.message },
       { status: error.status, headers: { "cache-control": "no-store" } },

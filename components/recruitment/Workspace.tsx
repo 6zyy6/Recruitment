@@ -44,6 +44,7 @@ import { STAGES, STAGE_LABELS, ROLE_LABELS } from "@/lib/domain";
 import { getMetrics } from "@/lib/metrics";
 import Modals from "./Modals";
 import SelectionCenter from "./SelectionCenter";
+import CandidateReviewInvite from "./CandidateReviewInvite";
 import {
   Avatar,
   Badge,
@@ -2032,6 +2033,15 @@ export default function Workspace() {
             <div className="drawer-body">
               {detailTab === "profile" && (
                 <>
+                  {isHR && (
+                    <CandidateReviewInvite
+                      key={activeApp.id}
+                      application={activeApp}
+                      revision={state.revision}
+                      onSnapshot={setSnapshot}
+                      onRefresh={refresh}
+                    />
+                  )}
                   <div className="detail-info-grid">
                     <div>
                       <span>邮箱</span>
@@ -2576,7 +2586,11 @@ export default function Workspace() {
           state={state}
           user={user}
           onAction={action}
-          onClose={() => setModal(null)}
+          onClose={() => {
+            const refreshAfterClose = modal.kind === "candidate";
+            setModal(null);
+            if (refreshAfterClose) void refresh();
+          }}
         />
       )}
       {quick && (

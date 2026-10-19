@@ -1,0 +1,219 @@
+/* Hallmark · component: candidate review · theme: Cobalt · pre-emit critique: P4 H4 E4 S5 R5 V4 */
+.candidate-review-page {
+  min-height: 100vh;
+  padding: 30px 20px;
+  background: var(--background);
+}
+.review-page-brand {
+  max-width: 790px;
+  margin: 0 auto 28px;
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+.review-page-brand > span:nth-child(2) {
+  display: grid;
+  gap: 2px;
+}
+.review-page-brand strong {
+  font-size: 19px;
+}
+.review-page-brand small {
+  color: var(--muted-foreground);
+  font-size: 11px;
+}
+.review-page-brand > svg {
+  margin-left: auto;
+  color: var(--primary);
+}
+.review-page-card {
+  max-width: 790px;
+  margin: auto;
+  padding: 35px;
+  background: var(--card);
+  border: 1px solid var(--border);
+  border-radius: 14px;
+}
+.review-page-intro {
+  display: flex;
+  gap: 15px;
+  align-items: flex-start;
+  margin-bottom: 24px;
+}
+.review-page-icon {
+  display: grid;
+  place-items: center;
+  width: 50px;
+  height: 50px;
+  border-radius: 12px;
+  background: var(--color-blue-soft);
+  color: var(--primary);
+  flex: none;
+}
+.review-page-intro h1 {
+  font-size: 24px;
+  line-height: 1.4;
+  margin: 4px 0 10px;
+}
+.review-page-intro p,
+.review-page-help {
+  color: var(--color-sub);
+  line-height: 1.9;
+  font-size: 12px;
+}
+.review-page-help {
+  margin: 20px 0;
+}
+.review-demo-note {
+  background: var(--color-amber-soft);
+  color: var(--color-amber);
+  padding: 12px 15px;
+  border-radius: 8px;
+  font-size: 11px;
+  line-height: 1.8;
+}
+.review-page-fields {
+  border: 0;
+  padding: 0;
+  margin: 0;
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 18px;
+}
+.review-page-fields :is(input, select, textarea) {
+  width: 100%;
+  font-size: 13px;
+  min-height: 42px;
+}
+.review-confirm {
+  display: flex;
+  gap: 9px;
+  align-items: center;
+  margin: 28px 0 16px;
+  font-size: 12px;
+}
+.review-confirm input {
+  width: 16px;
+  height: 16px;
+  accent-color: var(--primary);
+}
+.review-page-submit {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 15px;
+  border-top: 1px solid var(--border);
+  padding-top: 22px;
+}
+.review-page-submit > span {
+  font-size: 11px;
+  color: var(--muted-foreground);
+}
+.review-page-submit button {
+  min-height: 44px;
+  white-space: nowrap;
+}
+.review-page-state {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  text-align: center;
+  padding: 45px 10px;
+  gap: 15px;
+}
+.review-page-state > svg {
+  color: var(--primary);
+}
+.review-page-state h1 {
+  font-size: 25px;
+}
+.review-page-state p {
+  max-width: 500px;
+  font-size: 13px;
+  color: var(--color-sub);
+  line-height: 1.9;
+}
+.review-page-state small,
+.review-page-footer {
+  font-size: 11px;
+  color: var(--muted-foreground);
+  line-height: 1.8;
+}
+.review-page-footer {
+  text-align: center;
+  padding: 25px 5px 0;
+}
+.review-invite-card {
+  margin-bottom: 22px;
+  padding: 17px;
+  border: 1px solid var(--color-blue-border);
+  border-radius: 9px;
+  background: var(--color-blue-soft);
+}
+.review-invite-card h3 {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+  flex-wrap: wrap;
+  margin-bottom: 10px;
+}
+.review-invite-card p {
+  font-size: 11px;
+  color: var(--color-sub);
+  line-height: 1.8;
+  margin: 7px 0;
+}
+.review-invite-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-top: 12px;
+}
+.review-invite-preview {
+  background: var(--card);
+  border: 1px solid var(--color-blue-border);
+  border-radius: 7px;
+  padding: 13px;
+  margin-top: 14px;
+}
+.review-invite-preview > small {
+  color: var(--color-sub);
+}
+.review-invite-preview pre {
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  font-family: var(--font-body);
+  font-size: 11px;
+  line-height: 1.8;
+  max-height: 180px;
+  overflow-y: auto;
+}
+@media (max-width: 600px) {
+  .candidate-review-page {
+    padding: 20px 12px;
+  }
+  .review-page-card {
+    padding: 22px 18px;
+  }
+  .review-page-intro {
+    gap: 10px;
+  }
+  .review-page-icon {
+    width: 38px;
+    height: 38px;
+  }
+  .review-page-intro h1 {
+    font-size: 21px;
+  }
+  .review-page-fields {
+    grid-template-columns: minmax(0, 1fr);
+  }
+  .review-page-submit {
+    flex-direction: column;
+    align-items: stretch;
+  }
+  .review-page-state h1 {
+    font-size: 22px;
+  }
+}

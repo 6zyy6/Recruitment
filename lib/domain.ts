@@ -117,6 +117,41 @@ export interface Candidate {
   availability: string;
   createdAt: string;
   restricted?: boolean;
+  review?: CandidateReviewSummary;
+}
+export type CandidateReviewDelivery = "preview" | "pending" | "sent" | "failed";
+export interface CandidateReviewSummary {
+  reviewId: string;
+  applicationId: string;
+  status: "pending" | "submitted" | "revoked" | "expired";
+  version: number;
+  createdAt: string;
+  expiresAt: string;
+  submittedAt: string;
+  revokedAt: string;
+  delivery: CandidateReviewDelivery;
+}
+export interface CandidateReviewFields {
+  name: string;
+  email: string;
+  phone: string;
+  school: string;
+  education: string;
+  major: string;
+  graduationYear: number | null;
+  skills: string[];
+  availability: string;
+}
+// Stored only in the server state; never included in an authenticated projection.
+export interface CandidateReview extends CandidateReviewSummary {
+  id: string;
+  candidateId: string;
+  createdBy: string;
+  tokenHash: string;
+  fields: CandidateReviewFields;
+  candidateAtIssue: CandidateReviewFields;
+  submittedFields?: CandidateReviewFields;
+  deliveryReason: string;
 }
 export interface Application {
   id: string;
@@ -203,6 +238,7 @@ export interface AppState {
   scorecards: Scorecard[];
   events: Activity[];
   imports: ImportJob[];
+  reviews?: CandidateReview[];
 }
 export interface Snapshot {
   user: User;
