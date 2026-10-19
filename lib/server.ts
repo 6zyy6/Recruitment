@@ -2,6 +2,7 @@ import { env } from "cloudflare:workers";
 import type { AppState, User } from "./domain.ts";
 import { applyAction, BusinessError, projectState } from "./engine.ts";
 import { createSeed, DEMO_USERS } from "./seed.ts";
+import { createMySqlStorage } from "./mysql-storage.ts";
 import {
   CandidateReviewError,
   CANDIDATE_REVIEW_DEMO_NOTICE,
@@ -17,15 +18,8 @@ const SESSION_MS = 12 * 60 * 60 * 1000;
 // Public demo password is verified by a digest; neither sessions nor the state store hold plaintext passwords.
 const DEMO_PASSWORD_HASH =
   "9aa06636a970197980fd91eb654ce6a7362be5a3ca6968c309702a9a04afb2b1";
-function database(): D1Database {
-  const binding = (env as unknown as { DB?: D1Database }).DB;
-  if (!binding)
-    throw new BusinessError(
-      "DATABASE_UNAVAILABLE",
-      "数据库尚未连接，请检查 D1 绑定",
-      503,
-    );
-  return binding;
+function database() {
+  return createMySqlStorage(env as Cloudflare.Env);
 }
 async function hash(value: string): Promise<string> {
   const digest = await crypto.subtle.digest(
@@ -83,21 +77,14 @@ export async function readBody(
 }
 export async function loadState(): Promise<AppState> {
   const db = database();
-  const get = () =>
-    db
-      .prepare("SELECT revision, payload FROM recruitment_state WHERE id = ?")
-      .bind("main")
-      .first<{ revision: number; payload: string }>();
-  let row = await get();
+  let row = await db.readState();
   if (!row) {
     const initial = createSeed();
-    await db
-      .prepare(
-        "INSERT OR IGNORE INTO recruitment_state (id, revision, payload) VALUES (?, ?, ?)",
-      )
-      .bind("main", initial.revision, JSON.stringify(initial))
-      .run();
-    row = await get();
+    await db.initializeState({
+      revision: initial.revision,
+      payload: JSON.stringify(initial),
+    });
+    row = await db.readState();
   }
   if (!row)
     throw new BusinessError(
@@ -116,10 +103,7 @@ export async function getUser(
   const token = tokenFrom(request);
   let user: User | null = null;
   if (token && /^[a-f0-9]{64}$/.test(token)) {
-    const session = await database()
-      .prepare("SELECT user_id, expires_at FROM sessions WHERE token_hash = ?")
-      .bind(await hash(token))
-      .first<{ user_id: string; expires_at: number }>();
+    const session = await database().findSession(await hash(token));
     if (session && session.expires_at > Date.now())
       user =
         DEMO_USERS.find((account) => account.id === session.user_id) || null;
@@ -139,24 +123,12 @@ export async function login(request: Request, body: Record<string, unknown>) {
     throw new BusinessError("INVALID_CREDENTIALS", "账号或演示密码不正确", 401);
   const db = database(),
     oldToken = tokenFrom(request);
-  if (oldToken)
-    await db
-      .prepare("DELETE FROM sessions WHERE token_hash = ?")
-      .bind(await hash(oldToken))
-      .run();
-  await db
-    .prepare("DELETE FROM sessions WHERE expires_at <= ?")
-    .bind(Date.now())
-    .run();
+  if (oldToken) await db.deleteSession(await hash(oldToken));
+  await db.pruneSessions(Date.now());
   const token = [...crypto.getRandomValues(new Uint8Array(32))]
     .map((byte) => byte.toString(16).padStart(2, "0"))
     .join("");
-  await db
-    .prepare(
-      "INSERT INTO sessions (token_hash, user_id, expires_at) VALUES (?, ?, ?)",
-    )
-    .bind(await hash(token), user.id, Date.now() + SESSION_MS)
-    .run();
+  await db.createSession(await hash(token), user.id, Date.now() + SESSION_MS);
   return Response.json(
     { user, users: DEMO_USERS },
     {
@@ -170,11 +142,7 @@ export async function login(request: Request, body: Record<string, unknown>) {
 export async function logout(request: Request) {
   checkOrigin(request);
   const token = tokenFrom(request);
-  if (token)
-    await database()
-      .prepare("DELETE FROM sessions WHERE token_hash = ?")
-      .bind(await hash(token))
-      .run();
+  if (token) await database().deleteSession(await hash(token));
   return Response.json(
     { user: null, users: DEMO_USERS },
     {
@@ -216,13 +184,11 @@ async function saveState(current: AppState, next: AppState) {
       413,
     );
   // Compare-and-swap ensures two requests with the same revision cannot both write.
-  const result = await database()
-    .prepare(
-      "UPDATE recruitment_state SET revision = ?, payload = ? WHERE id = ? AND revision = ?",
-    )
-    .bind(next.revision, payload, "main", current.revision)
-    .run();
-  if (result.meta.changes !== 1)
+  const saved = await database().saveState(current.revision, {
+    revision: next.revision,
+    payload,
+  });
+  if (!saved)
     throw new BusinessError(
       "REVISION_CONFLICT",
       "数据已被其他操作更新，请刷新后重试",

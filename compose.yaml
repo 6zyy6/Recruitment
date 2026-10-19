@@ -1,0 +1,59 @@
+name: talentflow-mysql
+
+services:
+  mysql:
+    image: mysql:8.4
+    environment:
+      MYSQL_DATABASE: talentflow
+      MYSQL_USER: talentflow
+      MYSQL_PASSWORD: ${MYSQL_PASSWORD:?Run node scripts/setup-local-mysql.mjs first}
+      MYSQL_ROOT_PASSWORD: ${MYSQL_ROOT_PASSWORD:?Run node scripts/setup-local-mysql.mjs first}
+    ports:
+      - "127.0.0.1:13306:3306"
+    volumes:
+      - mysql-data:/var/lib/mysql
+      - ./services/storage/schema.sql:/docker-entrypoint-initdb.d/001-schema.sql:ro
+    healthcheck:
+      test: ["CMD-SHELL", "MYSQL_PWD=\"$$MYSQL_PASSWORD\" mysql -u\"$$MYSQL_USER\" -D\"$$MYSQL_DATABASE\" -e 'SELECT 1' >/dev/null 2>&1"]
+      interval: 5s
+      timeout: 3s
+      retries: 30
+      start_period: 20s
+
+  redis:
+    image: redis:7.4-alpine
+    command: ["redis-server", "--save", "", "--appendonly", "no", "--maxmemory", "64mb", "--maxmemory-policy", "allkeys-lru"]
+    ports:
+      - "127.0.0.1:16379:6379"
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+
+  storage:
+    build: ./services/storage
+    environment:
+      MYSQL_HOST: mysql
+      MYSQL_PORT: 3306
+      MYSQL_DATABASE: talentflow
+      MYSQL_USER: talentflow
+      MYSQL_PASSWORD: ${MYSQL_PASSWORD:?Run node scripts/setup-local-mysql.mjs first}
+      REDIS_URL: redis://redis:6379
+      STORAGE_API_TOKEN: ${STORAGE_API_TOKEN:?Run node scripts/setup-local-mysql.mjs first}
+      PORT: 8788
+    ports:
+      - "127.0.0.1:8788:8788"
+    healthcheck:
+      test: ["CMD", "node", "-e", "fetch('http://127.0.0.1:8788/v1/state/read',{method:'POST',headers:{'content-type':'application/json',authorization:'Bearer '+process.env.STORAGE_API_TOKEN},body:'{}'}).then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+    depends_on:
+      mysql:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+
+volumes:
+  mysql-data:
