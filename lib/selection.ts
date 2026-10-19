@@ -18,6 +18,7 @@ export const SELECTION_ACTIONS = [
   "configure_screening",
   "run_screening",
   "review_resume",
+  "ensure_resume_review",
   "confirm_screening",
   "verify_screening_info",
   "assign_assessment",
@@ -178,8 +179,16 @@ export function runRuleReview(
     });
   const result = report("rule", "岗位规则初筛", now, evidence);
   result.policy = policy;
-  result.summary = `${evidence.filter((item) => item.status === "matched").length} 项信息匹配，${evidence.filter((item) => item.status === "missing").length} 项待补充，${evidence.filter((item) => item.status === "unknown").length} 项未知。请结合原始资料人工判断。`;
+  result.summary = `${evidence.filter((item) => item.status === "matched").length} 项命中线索，${evidence.filter((item) => item.status === "missing").length} 项条件差异，${evidence.filter((item) => item.status === "unknown").length} 项未知。初筛仅整理线索，缺项和未知信息交由 AI 复筛与 HR 核实，不自动淘汰。`;
   return result;
+}
+export function initialScreeningReady(
+  value: SelectionReport | undefined,
+): boolean {
+  return Boolean(
+    value?.kind === "rule" &&
+      value.evidence.length,
+  );
 }
 export function runResumeReview(
   job: Job,
@@ -557,6 +566,11 @@ export function handleSelectionAction(
   const jobById = (jobId: unknown) =>
     state.jobs.find((job) => job.id === jobId) ??
     fail("NOT_FOUND", "职位不存在", 404);
+  const invalidateReview = (app: Application) => {
+    if (app.selection) delete app.selection.hrReview;
+    app.decision = "pending";
+    app.decisionNote = "";
+  };
   if (action === "configure_screening") {
     const job = jobById(input.jobId);
     if (job.status === "closed")
@@ -599,11 +613,19 @@ export function handleSelectionAction(
         const needsReview =
           app.status === "active" &&
           ["new", "screening", "interview"].includes(app.stage);
-        if (needsReview && app.selection) delete app.selection.hrReview;
+        if (needsReview) {
+          invalidateReview(app);
+          if (app.selection?.aiReview && ["pending", "running"].includes(app.selection.aiReview.status))
+            app.selection.aiReview = {
+              status: "blocked",
+              message: "岗位规则已更新，请重新执行岗位初筛后生成 AI 复筛报告。",
+              updatedAt: now,
+            };
+        }
         audit(
           app,
           needsReview
-            ? "岗位甄选规则已更新；历史报告保留原规则快照，请按新规则重跑报告，需重新人工复核。"
+            ? "岗位甄选规则已更新；历史报告保留原规则快照，请按新规则重跑报告；原HR结论及经理决定失效，需重新人工复核。"
             : "岗位甄选规则已更新；保留本投递的历史报告和HR结论，不修改已结束或进入后续阶段的结果。",
         );
       });
@@ -684,19 +706,23 @@ export function handleSelectionAction(
       app.snapshot.skills = [
         ...new Set((input.skills as string[]).map((skill) => skill.trim())),
       ];
-      delete app.selection.ruleReview;
+      app.selection.ruleReview = runRuleReview(job, app.snapshot, now);
       delete app.selection.resumeReview;
-      delete app.selection.hrReview;
+      delete app.selection.aiReview;
+      invalidateReview(app);
+      app.screeningNote = "";
       audit(
         app,
-        `人工核实本投递条件：${JSON.stringify(before)} → ${JSON.stringify({ education, graduationYear: app.snapshot.graduationYear, skills: app.snapshot.skills })}；依据：${note}。旧筛选报告及结论已失效，请重新执行；主档和其他投递未改动。`,
+        `人工核实本投递条件：${JSON.stringify(before)} → ${JSON.stringify({ education, graduationYear: app.snapshot.graduationYear, skills: app.snapshot.skills })}；依据：${note}。已按更正资料重新初筛；旧复筛报告、HR结论及经理决定已失效，需重新人工复核；主档和其他投递未改动。`,
       );
       break;
     }
     case "run_screening":
       app.selection.ruleReview = runRuleReview(job, app.snapshot, now);
-      delete app.selection.hrReview;
-      audit(app, "完成岗位规则初筛；只标记匹配、缺项和未知信息，未自动淘汰；原HR结论失效，需重新人工复核。");
+      delete app.selection.resumeReview;
+      delete app.selection.aiReview;
+      invalidateReview(app);
+      audit(app, "完成岗位规则初筛；只标记匹配、缺项和未知信息，未自动淘汰；旧简历复筛报告、HR结论及经理决定失效，需重新人工复核。");
       break;
     case "review_resume":
       if (!app.selection.ruleReview)
@@ -706,10 +732,45 @@ export function handleSelectionAction(
         );
       if (!isCurrent(app.selection.ruleReview))
         fail("SELECTION_REPORT_STALE", "岗位规则已更新，请先重新执行规则初筛");
-      app.selection.resumeReview = runResumeReview(job, app.snapshot, now);
-      delete app.selection.hrReview;
-      audit(app, "完成简历复筛固定规则演示；评分来自可核对的公开规则；原HR结论失效，需重新人工复核。");
+      if (!initialScreeningReady(app.selection.ruleReview))
+        fail("INITIAL_SCREENING_REQUIRED", "请先完成岗位线索初筛，再生成 AI 复筛报告");
+      if (!app.snapshot.resume.trim())
+        fail("RESUME_REQUIRED", "请先上传或填写简历文本，再生成 AI 复筛报告");
+      delete app.selection.resumeReview;
+      app.selection.aiReview = {
+        status: "pending",
+        message: "初筛已完成，正在等待 AI 简历复筛；缺项与未知信息将交由 AI 和 HR 核实。",
+        updatedAt: now,
+      };
+      invalidateReview(app);
+      audit(app, "请求 AI 简历复筛；旧复筛报告、HR结论及经理决定失效，报告生成后需重新人工复核。");
       break;
+    case "ensure_resume_review": {
+      app.selection.ruleReview ??= runRuleReview(job, app.snapshot, now);
+      const blocker = !isCurrent(app.selection.ruleReview)
+        ? "岗位规则已更新，请重新执行岗位初筛后生成 AI 复筛报告。"
+        : !initialScreeningReady(app.selection.ruleReview)
+          ? "请先完成岗位线索初筛，再生成 AI 复筛报告。"
+          : !app.snapshot.resume.trim()
+            ? "请先上传或填写简历文本，再生成 AI 复筛报告。"
+            : "";
+      if (blocker) {
+        app.selection.aiReview = { status: "blocked", message: blocker, updatedAt: now };
+        audit(app, `AI 简历复筛暂未启动：${blocker}`);
+        break;
+      }
+      if (app.selection.resumeReview?.mode === "llm" && isCurrent(app.selection.resumeReview))
+        break;
+      delete app.selection.resumeReview;
+      app.selection.aiReview = {
+        status: "pending",
+        message: "初筛已完成，正在等待 AI 简历复筛；缺项与未知信息将交由 AI 和 HR 核实。",
+        updatedAt: now,
+      };
+      invalidateReview(app);
+      audit(app, "初筛已完成，已请求 AI 简历复筛；缺项与未知信息交由 AI 和 HR 核实；旧复筛报告、HR结论及经理决定失效，报告生成后需重新人工复核。");
+      break;
+    }
     case "confirm_screening": {
       const conclusion = text(input.conclusion),
         note = text(input.note);
@@ -719,7 +780,7 @@ export function handleSelectionAction(
         fail("REQUIRED", "请填写 5–2000 字符的人工判断依据");
       if (
         conclusion === "pass" &&
-        (!app.selection.ruleReview || !app.selection.resumeReview)
+        (!app.selection.ruleReview || app.selection.resumeReview?.mode !== "llm")
       )
         fail(
           "SELECTION_REVIEW_REQUIRED",
@@ -734,6 +795,7 @@ export function handleSelectionAction(
           "SELECTION_REPORT_STALE",
           "岗位规则已更新，请重新完成初筛和复筛后再确认通过",
         );
+      if (conclusion !== "pass") invalidateReview(app);
       app.selection.hrReview = {
         createdAt: now,
         actorId: user.id,

@@ -1,0 +1,162 @@
+.interview-invite {
+  margin-top: 12px;
+}
+.interview-invite-status,
+.interview-invite-actions {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+.interview-invite p {
+  margin: 6px 0;
+  color: var(--color-sub);
+  font-size: 11px;
+  line-height: 1.8;
+  overflow-wrap: anywhere;
+}
+.interview-invite-actions {
+  margin-top: 8px;
+}
+.interview-response-note {
+  white-space: pre-wrap;
+}
+.interview-invite-modal > p:first-child {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.interview-mail-preview {
+  padding: 16px;
+  background: var(--background);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+}
+.interview-mail-preview small,
+.interview-mail-preview p {
+  font-size: 11px;
+  color: var(--color-sub);
+  line-height: 1.8;
+}
+.interview-mail-preview h3 {
+  margin: 12px 0;
+  font-size: 15px;
+}
+.interview-mail-preview pre {
+  max-height: 340px;
+  overflow-y: auto;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  font: 12px/1.9 var(--font-body);
+}
+.interview-invite-modal > .form-error {
+  margin-top: 14px;
+}
+.interview-response-details {
+  margin: 0 0 28px;
+  border-top: 1px solid var(--border);
+}
+.interview-response-details > div {
+  display: grid;
+  grid-template-columns: 88px minmax(0, 1fr);
+  gap: 16px;
+  padding: 16px 0;
+  border-bottom: 1px solid var(--border);
+  font-size: 13px;
+  line-height: 1.8;
+}
+.interview-response-details dt {
+  color: var(--color-sub);
+}
+.interview-response-details dd {
+  margin: 0;
+  overflow-wrap: anywhere;
+}
+.interview-response-details small {
+  display: block;
+  color: var(--muted-foreground);
+  font-size: 11px;
+}
+.interview-response-details a {
+  color: var(--primary);
+  text-decoration: underline;
+  text-underline-offset: 3px;
+}
+.interview-response-choices {
+  margin: 0 0 24px;
+  padding: 0;
+  border: 0;
+}
+.interview-response-choices legend {
+  margin-bottom: 14px;
+  font-size: 14px;
+  font-weight: 600;
+}
+.interview-response-choice {
+  display: flex;
+  gap: 12px;
+  align-items: center;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 15px;
+  margin-bottom: 10px;
+  cursor: pointer;
+}
+.interview-response-choice:has(input:checked) {
+  border-color: var(--primary);
+  background: var(--color-blue-soft);
+}
+.interview-response-choice input {
+  width: 16px;
+  height: 16px;
+  accent-color: var(--primary);
+  flex: none;
+}
+.interview-response-choice span,
+.interview-response-result > div {
+  display: grid;
+  gap: 5px;
+}
+.interview-response-choice strong {
+  font-size: 13px;
+}
+.interview-response-choice small {
+  font-size: 11px;
+  color: var(--color-sub);
+}
+.interview-response-choices .field {
+  margin-top: 20px;
+}
+.interview-response-choices textarea {
+  width: 100%;
+  font-size: 13px;
+}
+.interview-response-result {
+  display: flex;
+  align-items: flex-start;
+  gap: 13px;
+  padding: 20px;
+  background: var(--color-blue-soft);
+  border: 1px solid var(--color-blue-border);
+  border-radius: 9px;
+}
+.interview-response-result > svg {
+  flex: none;
+  color: var(--primary);
+}
+.interview-response-result h2 {
+  font-size: 17px;
+}
+.interview-response-result p,
+.interview-response-result small {
+  color: var(--color-sub);
+  font-size: 12px;
+  line-height: 1.9;
+  overflow-wrap: anywhere;
+}
+@media (max-width: 600px) {
+  .interview-response-details > div {
+    grid-template-columns: 70px minmax(0, 1fr);
+    gap: 10px;
+  }
+}

@@ -1,10 +1,11 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import type { AppState, AssessmentKind } from "../lib/domain.ts";
+import type { AppState, AssessmentKind, SelectionReport } from "../lib/domain.ts";
 import { applyAction, BusinessError, projectState } from "../lib/engine.ts";
 import { createSeed } from "../lib/seed.ts";
 import { parseCsv } from "../lib/csv.ts";
 import {
+  initialScreeningReady,
   runResumeReview,
   runRuleReview,
   screeningPolicy,
@@ -47,9 +48,24 @@ function fresh(): AppState {
   return state;
 }
 function reviewed(state: AppState, applicationId = "application_1") {
-  let next = act(state, "run_screening", { applicationId });
-  next = act(next, "review_resume", { applicationId });
+  const next = act(state, "run_screening", { applicationId }),
+    app = appOf(next, applicationId);
+  // Unit fixtures supply a completed report; production completion happens asynchronously.
+  app.selection!.resumeReview = completedModelReport(next, applicationId);
   return next;
+}
+function completedModelReport(state: AppState, applicationId: string): SelectionReport {
+  const app = appOf(state, applicationId),
+    job = state.jobs.find((item) => item.id === app.jobId)!;
+  return {
+    createdAt: NOW.toISOString(), kind: "resume", mode: "llm", model: "test-fixture",
+    title: "简历复筛测试响应", summary: "简历提供了项目经历，个人职责和结果仍需人工核实。",
+    score: null, maxScore: null,
+    evidence: [{ label: "项目经历", status: "matched", quote: app.snapshot.resume.slice(0, 100) }],
+    gaps: ["个人贡献仍需面试核实"], questions: ["请说明个人承担的职责及可核实的结果。"],
+    disclaimer: "此为单元测试的结构化模型响应样本，未发起网络请求。",
+    policy: screeningPolicy(job),
+  };
 }
 function assign(
   state: AppState,
@@ -91,6 +107,80 @@ test("V1 persisted objects without new fields remain usable and are not reset", 
   assert.equal(appOf(state).selection!.ruleReview!.mode, "rule_demo");
   state = act(state, "advance", { applicationId: "application_1" });
   assert.equal(appOf(state).stage, "screening");
+});
+
+test("new intake automatically screens the application snapshot against its own job without fabricating AI results", () => {
+  let state = act(seed(), "createCandidate", {
+    jobId: "job_1",
+    name: "自动初筛测试",
+    email: "automatic-screening@example.com",
+    education: "bachelor",
+    skills: ["产品规划", "用户研究"],
+    resume: "负责产品规划与用户研究，推动团队项目交付。",
+  });
+  const first = state.applications.at(-1)!,
+    original = structuredClone(first);
+  assert.deepEqual(first.selection!.ruleReview!.policy, screeningPolicy(state.jobs[0]));
+  assert.equal(initialScreeningReady(first.selection!.ruleReview), true);
+  assert.equal(first.selection!.resumeReview, undefined);
+  assert.equal(first.selection!.hrReview, undefined);
+  assert.equal(first.stage, "new");
+  rejectsCode(() => act(state, "confirm_screening", {
+    applicationId: first.id, conclusion: "pass", note: "不能跳过真实 AI 报告直接通过",
+  }), "SELECTION_REVIEW_REQUIRED");
+
+  state = act(state, "updateCandidate", {
+    candidateId: first.candidateId,
+    skills: ["React", "TypeScript"],
+    resume: "负责 React 和 TypeScript 项目开发。",
+  });
+  state = act(state, "createApplication", { candidateId: first.candidateId, jobId: "job_2" });
+  const second = state.applications.at(-1)!;
+  assert.deepEqual(second.selection!.ruleReview!.policy, screeningPolicy(state.jobs[1]));
+  assert.equal(initialScreeningReady(second.selection!.ruleReview), true);
+  assert.match(second.snapshot.resume, /React/);
+  assert.deepEqual(appOf(state, first.id).snapshot, original.snapshot);
+  assert.deepEqual(appOf(state, first.id).selection, original.selection);
+
+  state = act(state, "importPreview", {
+    jobId: "job_1", csv: "name,email,education,skills\n导入初筛测试,automatic-import@example.com,bachelor,产品规划",
+  });
+  state = act(state, "importCommit", { importId: state.imports[0].id, linkDuplicates: false });
+  const imported = state.applications.at(-1)!;
+  assert.ok(imported.selection!.ruleReview);
+  assert.equal(initialScreeningReady(imported.selection!.ruleReview), true);
+  assert.equal(imported.snapshot.resume, "");
+  assert.equal(imported.selection!.resumeReview, undefined);
+  assert.equal(imported.status, "active");
+});
+
+test("CSV intake without listed skills queues only applications with resume text and preserves initial findings", () => {
+  let state = act(fresh(), "configure_screening", policy);
+  state = act(state, "importPreview", {
+    jobId: "job_1",
+    csv: "name,email,education,resume\n有正文待复筛,with-resume@example.com,unknown,参与过相关项目，详细职责待核实\n无正文待补充,without-resume@example.com,unknown,",
+  });
+  state = act(state, "importCommit", { importId: state.imports[0].id, linkDuplicates: false });
+  const imported = state.applications.filter((app) => ["with-resume@example.com", "without-resume@example.com"].includes(app.snapshot.email));
+  assert.equal(imported.length, 2);
+  for (const app of imported) {
+    const initial = structuredClone(app.selection!.ruleReview);
+    assert.deepEqual(app.snapshot.skills, []);
+    assert.ok(initial!.evidence.some((item) => item.label.includes("必备技能") && item.status === "unknown"));
+    assert.match(initial!.summary, /未知/);
+    const requested = act(state, "ensure_resume_review", { applicationId: app.id });
+    const after = appOf(requested, app.id);
+    assert.equal(after.selection!.aiReview!.status, app.snapshot.resume ? "pending" : "blocked");
+    if (!app.snapshot.resume) assert.match(after.selection!.aiReview!.message, /上传或填写简历文本/);
+    assert.deepEqual(after.selection!.ruleReview, initial);
+    assert.equal(after.selection!.resumeReview, undefined);
+    assert.equal(after.selection!.hrReview, undefined);
+    assert.equal(after.stage, "new");
+    assert.equal(after.status, "active");
+    rejectsCode(() => act(requested, "confirm_screening", {
+      applicationId: app.id, conclusion: "pass", note: "仍需真实复筛报告与人工判断",
+    }), "SELECTION_REVIEW_REQUIRED");
+  }
 });
 
 test("screening configuration validates input and role, without rewriting historical reports", () => {
@@ -180,19 +270,14 @@ test("screening quotes only candidate fields, is job-specific and treats degree 
   assert.deepEqual(result.policy, screeningPolicy(job));
 });
 
-test("resume scoring is deterministic, quotes actual text and requires current rule review", () => {
-  let state = fresh();
-  rejectsCode(
-    () => act(state, "review_resume", { applicationId: "application_1" }),
-    "SELECTION_RULE_REQUIRED",
-  );
-  state = reviewed(state);
-  const app = appOf(state),
+test("legacy resume scoring is deterministic and quotes actual text", () => {
+  const state = seed(),
+    app = appOf(state),
     job = state.jobs[0],
     result = app.selection!.resumeReview!;
   assert.deepEqual(
     result,
-    runResumeReview(job, app.snapshot, NOW.toISOString()),
+    runResumeReview(job, app.snapshot, result.createdAt),
   );
   assert.equal(
     result.score,
@@ -205,6 +290,35 @@ test("resume scoring is deterministic, quotes actual text and requires current r
       item.quote.includes(app.snapshot.resume.slice(0, 40)),
     ),
   );
+});
+
+test("a historical rule-demo resume report cannot support a new HR passing conclusion", () => {
+  const state = seed(), before = structuredClone(state);
+  assert.equal(appOf(state).selection!.resumeReview!.mode, "rule_demo");
+  rejectsCode(() => act(state, "confirm_screening", {
+    applicationId: "application_1", conclusion: "pass", note: "历史模拟评分不能代替真实复筛",
+  }), "SELECTION_REVIEW_REQUIRED");
+  assert.deepEqual(state, before);
+});
+
+test("AI resume review requires current initial screening and requests completion without a fake report", () => {
+  let state = fresh();
+  rejectsCode(
+    () => act(state, "review_resume", { applicationId: "application_1" }),
+    "SELECTION_RULE_REQUIRED",
+  );
+  state = reviewed(state);
+  assert.equal(initialScreeningReady(appOf(state).selection!.ruleReview), true);
+  const requested = act(state, "review_resume", { applicationId: "application_1" });
+  assert.equal(appOf(requested).selection!.resumeReview, undefined);
+  assert.equal(appOf(requested).selection!.aiReview!.status, "pending");
+  assert.equal(appOf(requested).stage, "new");
+  assert.ok(requested.events.some((item) => item.type === "review_resume" && item.note.includes("请求 AI")));
+  const rescreened = act(requested, "run_screening", { applicationId: "application_1" });
+  assert.equal(appOf(rescreened).selection!.aiReview, undefined);
+  const noResume = structuredClone(state);
+  appOf(noResume).snapshot.resume = "  ";
+  rejectsCode(() => act(noResume, "review_resume", { applicationId: "application_1" }), "RESUME_REQUIRED");
   state = act(state, "configure_screening", policy);
   rejectsCode(
     () => act(state, "review_resume", { applicationId: "application_1" }),
@@ -219,6 +333,112 @@ test("resume scoring is deterministic, quotes actual text and requires current r
       }),
     "SELECTION_REPORT_STALE",
   );
+});
+
+test("opening an eligible legacy application queues a real report and preserves a current real result", () => {
+  const applicationId = "application_1";
+  for (const userId of ["manager", "interviewer", "admin"])
+    rejectsCode(() => act(seed(), "ensure_resume_review", { applicationId }, userId), "FORBIDDEN");
+  const missing = act(fresh(), "ensure_resume_review", { applicationId });
+  assert.equal(initialScreeningReady(appOf(missing).selection!.ruleReview), true);
+  assert.equal(appOf(missing).selection!.aiReview!.status, "pending");
+  assert.equal(appOf(missing).selection!.resumeReview, undefined);
+
+  const legacy = act(reviewed(fresh()), "confirm_screening", {
+    applicationId, conclusion: "pass", note: "已有历史人工通过记录",
+  });
+  appOf(legacy).selection!.resumeReview = runResumeReview(
+    legacy.jobs[0], appOf(legacy).snapshot, NOW.toISOString(),
+  );
+  appOf(legacy).decision = "hire";
+  appOf(legacy).decisionNote = "已有历史经理录用记录";
+  const queued = act(legacy, "ensure_resume_review", { applicationId });
+  assert.equal(appOf(queued).selection!.resumeReview, undefined);
+  assert.equal(appOf(queued).selection!.aiReview!.status, "pending");
+  assert.equal(appOf(queued).selection!.hrReview, undefined);
+  assert.equal(appOf(queued).decision, "pending");
+  assert.equal(appOf(queued).stage, appOf(legacy).stage);
+
+  const real = structuredClone(legacy);
+  appOf(real).selection!.resumeReview = completedModelReport(real, applicationId);
+  const retained = act(real, "ensure_resume_review", { applicationId });
+  assert.deepEqual(appOf(retained), appOf(real));
+  assert.deepEqual(retained.events, real.events);
+});
+
+test("legacy review blockers are explicit and preserve prior human decisions and evidence", () => {
+  const applicationId = "application_1";
+  const cases = [
+    {
+      message: /岗位规则已更新/,
+      prepare: (state: AppState) => { appOf(state).selection!.ruleReview!.policy!.minimumEducation = "doctor"; },
+    },
+    {
+      message: /上传或填写简历文本/,
+      prepare: (state: AppState) => { appOf(state).snapshot.resume = " "; },
+    },
+  ];
+  for (const { message, prepare } of cases) {
+    const state = reviewed(fresh());
+    appOf(state).selection!.hrReview = {
+      createdAt: NOW.toISOString(), actorId: "hr", conclusion: "pass", note: "保留既有人工依据",
+    };
+    appOf(state).decision = "hire";
+    appOf(state).decisionNote = "保留既有经理依据";
+    prepare(state);
+    const next = act(state, "ensure_resume_review", { applicationId });
+    assert.equal(appOf(next).selection!.aiReview!.status, "blocked");
+    assert.match(appOf(next).selection!.aiReview!.message, message);
+    assert.deepEqual(appOf(next).selection!.hrReview, appOf(state).selection!.hrReview);
+    assert.deepEqual(appOf(next).selection!.resumeReview, appOf(state).selection!.resumeReview);
+    assert.equal(appOf(next).decision, "hire");
+    assert.equal(appOf(next).decisionNote, "保留既有经理依据");
+    assert.equal(appOf(next).stage, "new");
+  }
+
+  const pending = act(fresh(), "ensure_resume_review", { applicationId });
+  const configured = act(pending, "configure_screening", policy);
+  assert.equal(appOf(configured).selection!.aiReview!.status, "blocked");
+  assert.match(appOf(configured).selection!.aiReview!.message, /岗位规则已更新/);
+});
+
+test("unknown and mismatched initial screening evidence remains available to AI and human review", () => {
+  let state = act(fresh(), "configure_screening", policy);
+  const app = appOf(state);
+  app.snapshot.education = "unknown";
+  app.snapshot.graduationYear = null;
+  app.snapshot.skills = [];
+  app.snapshot.resume = "尚待补充项目资料";
+  state = act(state, "run_screening", { applicationId: app.id });
+  assert.equal(initialScreeningReady(undefined), false);
+  assert.equal(initialScreeningReady(appOf(state).selection!.ruleReview), true);
+  assert.equal(initialScreeningReady({ ...appOf(state).selection!.ruleReview!, evidence: [] }), false);
+  assert.ok(appOf(state).selection!.ruleReview!.evidence.every((item) => item.status === "unknown"));
+  for (const action of ["review_resume", "ensure_resume_review"]) {
+    const requested = act(state, action, { applicationId: app.id });
+    assert.equal(appOf(requested).selection!.aiReview!.status, "pending");
+    assert.deepEqual(appOf(requested).selection!.ruleReview, appOf(state).selection!.ruleReview);
+    assert.equal(appOf(requested).selection!.resumeReview, undefined);
+    assert.equal(appOf(requested).selection!.hrReview, undefined);
+    assert.equal(appOf(requested).stage, "new");
+    rejectsCode(() => act(requested, "confirm_screening", {
+      applicationId: app.id, conclusion: "pass", note: "待核实材料还需要真实报告与人工结论",
+    }), "SELECTION_REVIEW_REQUIRED");
+  }
+  appOf(state).snapshot.education = "college";
+  appOf(state).snapshot.graduationYear = 2024;
+  state = act(state, "run_screening", { applicationId: app.id });
+  assert.equal(initialScreeningReady(appOf(state).selection!.ruleReview), true);
+  assert.ok(appOf(state).selection!.ruleReview!.evidence.some((item) => item.status === "missing"));
+  for (const action of ["review_resume", "ensure_resume_review"]) {
+    const requested = act(state, action, { applicationId: app.id });
+    assert.equal(appOf(requested).selection!.aiReview!.status, "pending");
+    assert.deepEqual(appOf(requested).selection!.ruleReview, appOf(state).selection!.ruleReview);
+    assert.equal(appOf(requested).selection!.resumeReview, undefined);
+    assert.equal(appOf(requested).selection!.hrReview, undefined);
+  }
+  assert.equal(appOf(state).selection!.resumeReview, undefined);
+  assert.equal(appOf(state).status, "active");
 });
 
 test("only HR human rejection closes an application; pass and hold do not advance", () => {
@@ -273,6 +493,9 @@ test("explicit verification updates only one application snapshot, clears stale 
     candidateBefore = structuredClone(
       state.candidates.find((person) => person.id === app.candidateId)!,
     );
+  app.decision = "hire";
+  app.decisionNote = "更正前依据原资料作出的录用决定";
+  app.selection!.aiReview = { status: "running", message: "正在生成", updatedAt: NOW.toISOString() };
   const other = state.applications.find(
     (item) => item.candidateId === app.candidateId && item.id !== app.id,
   )!;
@@ -308,9 +531,14 @@ test("explicit verification updates only one application snapshot, clears stale 
   const after = appOf(state);
   assert.equal(after.snapshot.education, "master");
   assert.equal(after.snapshot.graduationYear, null);
-  assert.equal(after.selection!.ruleReview, undefined);
+  assert.deepEqual(after.selection!.ruleReview, runRuleReview(
+    state.jobs.find((job) => job.id === after.jobId)!, after.snapshot, NOW.toISOString(),
+  ));
   assert.equal(after.selection!.resumeReview, undefined);
+  assert.equal(after.selection!.aiReview, undefined);
   assert.equal(after.selection!.hrReview, undefined);
+  assert.equal(after.decision, "pending");
+  assert.equal(after.decisionNote, "");
   assert.equal(after.selection!.assessments.length, 1);
   assert.deepEqual(
     state.candidates.find((person) => person.id === app.candidateId),
@@ -324,6 +552,44 @@ test("explicit verification updates only one application snapshot, clears stale 
         event.note.includes(verify.note),
     ),
   );
+});
+
+test("corrected interview-stage records require fresh HR review and manager decision before an offer", () => {
+  let state = seed();
+  const interview = state.interviews.find((item) =>
+    item.status === "completed" &&
+    appOf(state, item.applicationId).stage === "interview" &&
+    item.interviewerIds.every((userId) => state.scorecards.some((card) =>
+      card.interviewId === item.id && card.userId === userId && card.status === "submitted",
+    )),
+  )!;
+  const applicationId = interview.applicationId;
+  const confirm = (current: AppState) => act(current, "confirm_screening", {
+    applicationId, conclusion: "pass", note: "已核实原始资料与岗位全部要求",
+  });
+  const decide = (current: AppState) => act(current, "decision", {
+    applicationId, decision: "hire", note: "已核对人工筛选及全体面试评价",
+  }, "manager");
+  state = decide(confirm(reviewed(state, applicationId)));
+  state = act(state, "confirm_screening", {
+    applicationId, conclusion: "hold", note: "补充核实资料期间暂停录用决定",
+  });
+  assert.equal(appOf(state, applicationId).decision, "pending");
+  state = decide(confirm(state));
+  const snapshot = appOf(state, applicationId).snapshot;
+  state = act(state, "verify_screening_info", {
+    applicationId, education: "master", graduationYear: snapshot.graduationYear,
+    skills: snapshot.skills, note: "候选人补充学历证明后更正本次投递",
+  });
+  assert.equal(appOf(state, applicationId).decision, "pending");
+  assert.equal(appOf(state, applicationId).stage, "interview");
+  rejectsCode(() => decide(state), "SCREENING_APPROVAL_REQUIRED");
+  rejectsCode(() => act(state, "sendOffer", {
+    applicationId, deadline: "2026-10-25T10:00:00Z",
+  }), "DECISION_REQUIRED");
+  state = decide(confirm(reviewed(state, applicationId)));
+  state = act(state, "sendOffer", { applicationId, deadline: "2026-10-25T10:00:00Z" });
+  assert.equal(appOf(state, applicationId).offer.status, "sent");
 });
 
 test("assessment assignment snapshots questions and rejects invalid kind or duplicate pending task", () => {
@@ -677,6 +943,8 @@ test("policy changes and report reruns invalidate current HR conclusions while p
       note: "已人工核对原始资料及岗位证据",
     });
   const approved = confirm(reviewed(fresh()));
+  appOf(approved).decision = "hire";
+  appOf(approved).decisionNote = "原甄选证据支持录用";
   const previousRule = structuredClone(appOf(approved).selection!.ruleReview);
   const previousResume = structuredClone(appOf(approved).selection!.resumeReview);
   for (const [id, status, stage] of [
@@ -689,19 +957,27 @@ test("policy changes and report reruns invalidate current HR conclusions while p
   }
   const configured = act(approved, "configure_screening", policy);
   assert.equal(appOf(configured).selection!.hrReview, undefined);
+  assert.equal(appOf(configured).decision, "pending");
+  assert.equal(appOf(configured).decisionNote, "");
   assert.deepEqual(appOf(configured).selection!.ruleReview, previousRule);
   assert.deepEqual(appOf(configured).selection!.resumeReview, previousResume);
   for (const historical of configured.applications.filter((app) => app.id.startsWith("historical_"))) {
     assert.deepEqual(historical.selection!.hrReview, appOf(approved, historical.id).selection!.hrReview);
+    assert.equal(historical.decision, "hire");
   }
   assert.ok(configured.events.some((event) => event.applicationId === "application_1" && event.type === "configure_screening" && event.note.includes("需重新人工复核")));
   for (const action of ["run_screening", "review_resume"]) {
     const rerun = act(approved, action, { applicationId: "application_1" });
     assert.equal(appOf(rerun).selection!.hrReview, undefined);
+    assert.equal(appOf(rerun).decision, "pending");
+    assert.equal(appOf(rerun).decisionNote, "");
     assert.equal(appOf(rerun).status, "active");
     assert.equal(appOf(rerun).stage, "new");
     assert.ok(rerun.events.some((event) => event.applicationId === "application_1" && event.type === "confirm_screening" && event.note.includes("已人工核对原始资料及岗位证据")));
     assert.ok(rerun.events.some((event) => event.applicationId === "application_1" && event.type === action && event.note.includes("需重新人工复核")));
+    assert.equal(appOf(rerun).selection!.resumeReview, undefined);
+    rejectsCode(() => confirm(rerun), "SELECTION_REVIEW_REQUIRED");
+    appOf(rerun).selection!.resumeReview = structuredClone(previousResume);
     const reconfirmed = confirm(rerun);
     assert.equal(appOf(reconfirmed).selection!.hrReview!.conclusion, "pass");
   }

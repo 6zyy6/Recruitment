@@ -29,6 +29,7 @@ export interface SelectionEvidence {
   label: string;
   status: "matched" | "missing" | "unknown" | "info";
   quote: string;
+  reason?: string;
   points?: number;
   maxPoints?: number;
 }
@@ -41,7 +42,9 @@ export interface SelectionReport {
     | "preference"
     | "ai_interview"
     | "interview_assist";
-  mode: "rule_demo";
+  mode: "rule_demo" | "llm";
+  model?: string;
+  questions?: string[];
   ruleVersion?: string;
   title: string;
   summary: string;
@@ -77,6 +80,11 @@ export interface Assessment {
 export interface ApplicationSelection {
   ruleReview?: SelectionReport;
   resumeReview?: SelectionReport;
+  aiReview?: {
+    status: "pending" | "running" | "failed" | "blocked";
+    message: string;
+    updatedAt: string;
+  };
   hrReview?: {
     createdAt: string;
     actorId: string;
@@ -119,7 +127,12 @@ export interface Candidate {
   restricted?: boolean;
   review?: CandidateReviewSummary;
 }
-export type CandidateReviewDelivery = "preview" | "pending" | "sent" | "failed";
+export type CandidateReviewDelivery =
+  | "preview"
+  | "pending"
+  | "sent"
+  | "failed"
+  | "unknown";
 export interface CandidateReviewSummary {
   reviewId: string;
   applicationId: string;
@@ -130,6 +143,9 @@ export interface CandidateReviewSummary {
   submittedAt: string;
   revokedAt: string;
   delivery: CandidateReviewDelivery;
+  deliveryReason?: string;
+  providerMessageId?: string;
+  sentAt?: string;
 }
 export interface CandidateReviewFields {
   name: string;
@@ -189,8 +205,34 @@ export interface Interview {
   end: string;
   interviewerIds: string[];
   location: string;
+  meetingUrl?: string;
+  meetingId?: string;
+  meetingPassword?: string;
   status: "scheduled" | "completed" | "no_show" | "cancelled";
   notified: boolean;
+  invitation?: InterviewInvitationSummary;
+}
+export interface InterviewInvitationSummary {
+  id: string;
+  to: string;
+  createdAt: string;
+  expiresAt: string;
+  revokedAt: string;
+  delivery: "pending" | "sent" | "failed" | "unknown";
+  deliveryReason: string;
+  sentAt?: string;
+  providerMessageId?: string;
+  response: "pending" | "confirmed" | "reschedule_requested";
+  respondedAt: string;
+  responseNote: string;
+  version: number;
+}
+// Tokens stay hashed in server state and are omitted from role projections.
+export interface InterviewInvitation extends InterviewInvitationSummary {
+  interviewId: string;
+  createdBy: string;
+  tokenHash: string;
+  scheduleKey: string;
 }
 export interface Scorecard {
   id: string;
@@ -239,6 +281,13 @@ export interface AppState {
   events: Activity[];
   imports: ImportJob[];
   reviews?: CandidateReview[];
+  interviewInvitations?: InterviewInvitation[];
+  // Server-only idempotency records; never included in a client state projection.
+  careerSubmissions?: {
+    requestId: string;
+    inputHash: string;
+    receipt: { reference: string; jobTitle: string; submittedAt: string };
+  }[];
 }
 export interface Snapshot {
   user: User;

@@ -1010,6 +1010,20 @@ button:not(.primary):hover {
 .agenda-body small > svg {
   flex: none;
 }
+.meeting-info {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 7px 10px;
+  margin-top: 8px;
+  color: var(--muted-foreground);
+  font-size: 11px;
+  overflow-wrap: anywhere;
+}
+.meeting-info .button,
+.meeting-info .text-button {
+  font-size: 11px;
+}
 .agenda-summary {
   display: grid;
   grid-template-columns: repeat(3, minmax(0, 1fr));
@@ -1607,6 +1621,15 @@ button:not(.primary):hover {
   color: var(--muted-foreground);
   margin-top: 4px;
 }
+.core-modules .core-purpose {
+  color: var(--color-ink);
+}
+.core-modules > div > span {
+  min-width: 0;
+}
+.core-modules .button {
+  flex-shrink: 0;
+}
 .document-link {
   display: inline-flex;
   align-items: center;
@@ -1940,6 +1963,7 @@ button:not(.primary):hover {
   flex-wrap: wrap;
 }
 .drawer-body .agenda-actions {
+  flex-basis: 100%;
   margin-left: 53px;
   max-width: none;
   justify-content: flex-start;
@@ -2835,6 +2859,188 @@ button:not(.primary):hover {
     font-size: 11px;
     max-width: 92vw;
     width: max-content;
+  }
+}
+.resume-review {
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+.detail-section > .resume-review {
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  padding: 16px 18px;
+}
+.resume-review-status {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  margin-bottom: 14px;
+}
+.resume-review-indicator {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  color: var(--color-sub);
+  font-size: 12px;
+}
+.resume-review-indicator.complete {
+  color: var(--color-green);
+}
+.resume-review-indicator.pending {
+  color: var(--primary);
+}
+.resume-review-indicator.failed {
+  color: var(--color-red);
+}
+.resume-review-status > small,
+.resume-review-evidence > li > small {
+  color: var(--color-faint);
+  font-size: 10px;
+}
+.resume-review-empty h4 {
+  margin: 0 0 5px;
+  font-size: 14px;
+  font-weight: 600;
+}
+.resume-review-empty p {
+  color: var(--color-sub);
+  font-size: 12px;
+  line-height: 1.8;
+}
+.resume-review-empty .button {
+  margin-top: 14px;
+}
+.resume-review-summary {
+  color: var(--color-ink);
+  font-size: 13px;
+  line-height: 1.85;
+}
+.resume-review-counts {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px 20px;
+  padding: 14px 0;
+  border-bottom: 1px solid var(--border);
+  color: var(--color-sub);
+  font-size: 11px;
+}
+.resume-review-counts strong {
+  color: var(--color-ink);
+  font-size: 16px;
+  margin-right: 4px;
+  font-variant-numeric: tabular-nums;
+}
+.resume-review-evidence {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+.resume-review-evidence > li {
+  padding: 14px 0;
+  border-bottom: 1px solid var(--border);
+}
+.resume-review-evidence > li:last-child {
+  border-bottom: 0;
+}
+.resume-review-evidence > li > div {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+.resume-review-evidence h4 {
+  margin: 0;
+  font-size: 12px;
+  font-weight: 600;
+}
+.resume-review-evidence .badge {
+  flex: none;
+}
+.resume-review-evidence p {
+  color: var(--color-sub);
+  font-size: 11px;
+  line-height: 1.8;
+  margin-top: 5px;
+}
+.resume-review-evidence blockquote {
+  margin: 8px 0 0;
+  border-left: 2px solid var(--color-blue-border);
+  background: var(--background);
+  padding: 8px 11px;
+  color: var(--color-sub);
+  font-size: 11px;
+  line-height: 1.8;
+}
+.resume-review-evidence blockquote > span {
+  display: block;
+  margin-bottom: 3px;
+  color: var(--color-faint);
+  font-size: 10px;
+}
+.resume-review-details {
+  border-top: 1px solid var(--border);
+  color: var(--color-sub);
+  font-size: 11px;
+  line-height: 1.8;
+}
+.resume-review-details summary {
+  padding: 12px 0;
+  color: var(--color-ink);
+  cursor: pointer;
+  font-weight: 550;
+}
+.resume-review-details summary::marker {
+  color: var(--color-faint);
+}
+.resume-review-details summary > span {
+  margin-left: 6px;
+  color: var(--color-faint);
+  font-weight: 400;
+}
+.resume-review-details h5 {
+  font-size: 11px;
+  margin: 0 0 5px;
+}
+.resume-review-details ul,
+.resume-review-details ol {
+  margin: 0 0 12px;
+  padding-left: 19px;
+}
+.resume-review-details li + li {
+  margin-top: 5px;
+}
+.resume-review-history {
+  margin-top: 14px;
+}
+.resume-review-history small,
+.resume-review-meta {
+  color: var(--color-faint);
+  font-size: 10px;
+}
+.resume-review-meta {
+  margin-top: 12px;
+  border-top: 1px solid var(--border);
+  padding-top: 11px;
+  line-height: 1.8;
+}
+.resume-review-meta > span {
+  display: block;
+}
+@media (max-width: 480px) {
+  .detail-section > .resume-review {
+    padding: 14px;
+  }
+  .resume-review-status {
+    flex-wrap: wrap;
+    gap: 6px;
+  }
+  .resume-review-empty .button {
+    width: 100%;
+  }
+  .resume-review-evidence > li > div {
+    align-items: flex-start;
+    gap: 8px;
   }
 }
 @media (prefers-reduced-motion: reduce) {

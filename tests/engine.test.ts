@@ -4,6 +4,7 @@ import type { AppState, User } from "../lib/domain.ts";
 import { applyAction, BusinessError, projectState } from "../lib/engine.ts";
 import { createSeed } from "../lib/seed.ts";
 import { parseCsv } from "../lib/csv.ts";
+import { initialScreeningReady, screeningPolicy } from "../lib/selection.ts";
 
 const NOW = new Date("2026-10-19T02:00:00.000Z");
 const seed = () => createSeed(NOW);
@@ -35,8 +36,30 @@ const candidate = {
   availability: "两周",
 };
 function newApplication(state: AppState, jobId = "job_1") {
-  const next = act(state, { action: "createCandidate", jobId, ...candidate });
+  const next = act(state, {
+    action: "createCandidate", jobId, ...candidate,
+    education: "bachelor", skills: state.jobs.find((job) => job.id === jobId)!.skills,
+  });
   return { state: next, appId: next.applications.at(-1)!.id };
+}
+function approveScreening(state: AppState, applicationId: string) {
+  const app = state.applications.find((item) => item.id === applicationId)!,
+    job = state.jobs.find((item) => item.id === app.jobId)!;
+  assert.equal(initialScreeningReady(app.selection!.ruleReview), true);
+  // Supply the asynchronous completion fixture before exercising the HR gate.
+  app.selection!.resumeReview = {
+    createdAt: NOW.toISOString(), kind: "resume", mode: "llm", model: "test-fixture",
+    title: "简历复筛测试响应", summary: "简历提供了相关经历，个人职责仍需人工核实。",
+    score: null, maxScore: null,
+    evidence: [{ label: "相关经历", status: "matched", quote: app.snapshot.resume }],
+    gaps: [], questions: ["请说明个人承担的职责及可核实的结果。"],
+    disclaimer: "此为单元测试的结构化模型响应样本，未发起网络请求。",
+    policy: screeningPolicy(job),
+  };
+  return act(state, {
+    action: "confirm_screening", applicationId, conclusion: "pass",
+    note: "已人工核实简历报告及岗位条件",
+  });
 }
 
 // These checks exercise business boundaries, rather than re-stating individual implementation lines.
@@ -125,6 +148,10 @@ test("screening requires a human note and stages cannot be skipped", () => {
     () => act(state, { action: "advance", applicationId: appId }),
     "REQUIRED",
   );
+  rejectsCode(() => act(state, {
+    action: "advance", applicationId: appId, note: "尚未取得复筛报告",
+  }), "SCREENING_APPROVAL_REQUIRED");
+  state = approveScreening(state, appId);
   state = act(state, {
     action: "advance",
     applicationId: appId,
@@ -135,6 +162,85 @@ test("screening requires a human note and stages cannot be skipped", () => {
     () => act(state, { action: "advance", applicationId: appId }),
     "INVALID_TRANSITION",
   );
+});
+
+test("new screening records require current HR approval before advancing or hiring", () => {
+  let state = seed();
+  const appId = "application_1";
+  state = act(state, { action: "advance", applicationId: appId });
+  rejectsCode(
+    () => act(state, { action: "advance", applicationId: appId, note: "尝试跳过待核实结论" }),
+    "SCREENING_APPROVAL_REQUIRED",
+  );
+  state = approveScreening(state, appId);
+  const stale = structuredClone(state);
+  stale.jobs.find((job) => job.id === "job_1")!.screeningPolicy!.requiredSkills.push("新增要求");
+  rejectsCode(
+    () => act(stale, { action: "advance", applicationId: appId, note: "旧报告已与岗位要求不一致" }),
+    "SELECTION_REPORT_STALE",
+  );
+  state = act(state, { action: "advance", applicationId: appId, note: "人工筛选通过" });
+  state = act(state, { action: "run_screening", applicationId: appId });
+  rejectsCode(
+    () => act(state, {
+      action: "decision", applicationId: appId, decision: "hire", note: "尝试复用旧版筛选结论",
+    }, "manager"),
+    "SCREENING_APPROVAL_REQUIRED",
+  );
+  state.applications.find((app) => app.id === appId)!.decision = "hire";
+  rejectsCode(
+    () => act(state, {
+      action: "sendOffer", applicationId: appId, deadline: "2026-10-22T10:00:00Z",
+    }),
+    "SCREENING_APPROVAL_REQUIRED",
+  );
+});
+
+test("broad initial screening retains gaps for AI without bypassing the report and HR gates", () => {
+  let state = act(seed(), {
+    action: "configure_screening", jobId: "job_1", minimumEducation: "doctor",
+    requiredSkills: ["SQL"], graduationYears: [2027],
+  });
+  state = act(state, {
+    action: "createCandidate", jobId: "job_1", ...candidate,
+    education: "college", graduationYear: null,
+  });
+  const app = state.applications.at(-1)!;
+  assert.equal(initialScreeningReady(app.selection!.ruleReview), true);
+  assert.ok(app.selection!.ruleReview!.evidence.some((item) => item.status === "missing"));
+  assert.ok(app.selection!.ruleReview!.evidence.some((item) => item.status === "unknown"));
+  state = act(state, { action: "review_resume", applicationId: app.id });
+  assert.equal(state.applications.at(-1)!.selection!.aiReview!.status, "pending");
+  rejectsCode(() => act(state, {
+    action: "confirm_screening", applicationId: app.id, conclusion: "pass", note: "初筛保留资料不等于人工通过",
+  }), "SELECTION_REVIEW_REQUIRED");
+  state = act(state, { action: "advance", applicationId: app.id });
+  rejectsCode(() => act(state, {
+    action: "advance", applicationId: app.id, note: "不能仅依据宽进初筛直接进入面试",
+  }), "SCREENING_APPROVAL_REQUIRED");
+  state = approveScreening(state, app.id);
+  state = act(state, {
+    action: "advance", applicationId: app.id, note: "复筛报告完成并经 HR 留据确认",
+  });
+  assert.equal(state.applications.at(-1)!.stage, "interview");
+});
+
+test("contact validation rejects punctuation-only phones and preserves international numbers", () => {
+  for (const phone of ["-------", "((()))---", "123----", "1234567890123456"])
+    rejectsCode(
+      () => act(seed(), { action: "createCandidate", jobId: "job_1", ...candidate, email: "", phone }),
+      "INVALID_PHONE",
+    );
+  let state = act(seed(), {
+    action: "createCandidate", jobId: "job_1", ...candidate, email: "", phone: "+44 20 7946 0958",
+  });
+  assert.equal(state.candidates.at(-1)!.phone, "+44 20 7946 0958");
+  rejectsCode(
+    () => act(state, { action: "updateCandidate", candidateId: state.candidates.at(-1)!.id, phone: "-------" }),
+    "INVALID_PHONE",
+  );
+  state = act(state, { action: "importPreview", jobId: "job_1", csv: "name,email,phone\n无效电话,,-------" });
+  assert.equal(state.imports[0].rows[0].status, "error");
 });
 
 test("duplicate contacts cannot silently merge; explicit CSV linking creates an independent application", () => {
@@ -348,6 +454,7 @@ test("scheduling detects interviewer and cross-job candidate overlaps; cancellat
   const created = newApplication(seed());
   let state = created.state;
   const appId = created.appId;
+  state = approveScreening(state, appId);
   state = act(state, { action: "advance", applicationId: appId });
   state = act(state, {
     action: "advance",
@@ -415,6 +522,7 @@ test("HR and manager can complete a real candidate-to-join workflow with decisio
   const created = newApplication(seed(), "job_5");
   let state = created.state;
   const appId = created.appId;
+  state = approveScreening(state, appId);
   state = act(state, { action: "advance", applicationId: appId });
   state = act(state, {
     action: "advance",
@@ -715,10 +823,19 @@ test("campus records allow unknown and mismatched graduation years for human ver
     () => act(state, { action: "advance", applicationId: app.id }),
     "REQUIRED",
   );
+  rejectsCode(() => act(state, {
+    action: "advance", applicationId: app.id, note: "初筛尚有不符合条件",
+  }), "SCREENING_APPROVAL_REQUIRED");
+  state = act(state, {
+    action: "verify_screening_info", applicationId: app.id, education: "bachelor",
+    graduationYear: 2027, skills: state.jobs.find((job) => job.id === app.jobId)!.skills,
+    note: "根据候选人提供的证明核实毕业年份及技能",
+  });
+  state = approveScreening(state, app.id);
   state = act(state, {
     action: "advance",
     applicationId: app.id,
-    note: "已人工核实毕业年份，破格进入专业面试",
+    note: "已人工核实毕业年份，初筛复筛均完成并确认通过",
   });
   assert.equal(state.applications.at(-1)!.stage, "interview");
 });

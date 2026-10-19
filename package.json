@@ -14,7 +14,12 @@
     "db:generate": "drizzle-kit generate",
     "test": "node --experimental-strip-types --test tests/*.test.ts",
     "typecheck": "tsc --noEmit",
-    "test:api": "node scripts/api-smoke.mjs"
+    "test:api": "npm run test:api:workflow && npm run test:api:selection && npm run test:api:review && npm run test:api:interview && npm run test:api:careers",
+    "test:api:workflow": "node scripts/api-smoke.mjs",
+    "test:api:selection": "node scripts/selection-smoke.mjs",
+    "test:api:review": "node scripts/candidate-review-smoke.mjs",
+    "test:api:interview": "node scripts/interview-invitation-smoke.mjs --mail-disabled",
+    "test:api:careers": "node scripts/careers-smoke.mjs"
   },
   "dependencies": {
     "@base-ui/react": "^1.7.0",

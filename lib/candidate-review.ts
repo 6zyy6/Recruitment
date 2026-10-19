@@ -10,7 +10,7 @@ import type {
 
 const TTL = 7 * 24 * 60 * 60 * 1000;
 export const CANDIDATE_REVIEW_DEMO_NOTICE =
-  "当前为私有 Demo 的资料核对预览，仅站点所有者可访问。真实外部候选人需要独立开放的核对入口。";
+  "这是使用合成资料的 Demo 核对流程；请确认邀请来自招聘人员，勿填真实个人资料。";
 export class CandidateReviewError extends Error {
   code: string;
   status: number;
@@ -56,7 +56,9 @@ export function candidateReviewFields(
     availability: candidate.availability,
   };
 }
-function summary(review: CandidateReview): CandidateReviewSummary {
+export function candidateReviewSummary(
+  review: CandidateReview,
+): CandidateReviewSummary {
   return {
     reviewId: review.id,
     applicationId: review.applicationId,
@@ -67,6 +69,9 @@ function summary(review: CandidateReview): CandidateReviewSummary {
     submittedAt: review.submittedAt,
     revokedAt: review.revokedAt,
     delivery: review.delivery,
+    deliveryReason: review.deliveryReason,
+    providerMessageId: review.providerMessageId,
+    sentAt: review.sentAt,
   };
 }
 function hrGuard(state: AppState, user: User, input: Record<string, unknown>) {
@@ -124,11 +129,11 @@ function setSummary(
   app: Application,
   review: CandidateReview,
 ) {
-  app.snapshot.review = summary(review);
+  app.snapshot.review = candidateReviewSummary(review);
   const person = state.candidates.find(
     (item) => item.id === review.candidateId,
   );
-  if (person) person.review = summary(review);
+  if (person) person.review = candidateReviewSummary(review);
 }
 function pendingReview(state: AppState, tokenHash: string, clock: Date) {
   const review =
@@ -198,6 +203,20 @@ export function createCandidateReview(
     next.candidates.find((item) => item.id === app.candidateId) ??
     fail("NOT_FOUND", "候选人不存在", 404);
   next.reviews ??= [];
+  if (
+    input.sendEmail === true &&
+    next.reviews.some(
+      (item) =>
+        item.applicationId === app.id &&
+        item.status === "pending" &&
+        ["pending", "unknown"].includes(item.delivery),
+    )
+  )
+    fail(
+      "REVIEW_DELIVERY_UNCERTAIN",
+      "上一封核对邮件正在发送或结果待核实，请先查看 Gmail 已发送邮件；需要新邀请时请先撤销旧链接。",
+      409,
+    );
   next.reviews
     .filter(
       (item) => item.applicationId === app.id && item.status === "pending",
@@ -221,8 +240,11 @@ export function createCandidateReview(
     expiresAt: new Date(clock.getTime() + TTL).toISOString(),
     submittedAt: "",
     revokedAt: "",
-    delivery: "preview",
-    deliveryReason: `${CANDIDATE_REVIEW_DEMO_NOTICE}系统仅生成邮件预览，未发送邮件。`,
+    delivery: input.sendEmail === true ? "pending" : "preview",
+    deliveryReason:
+      input.sendEmail === true
+        ? "邮件正在发送，尚未取得 Gmail 回执。"
+        : `${CANDIDATE_REVIEW_DEMO_NOTICE}系统仅生成邮件预览，未发送邮件。`,
     fields: candidateReviewFields(app.snapshot),
     candidateAtIssue: candidateReviewFields(person),
   };
@@ -233,11 +255,73 @@ export function createCandidateReview(
     app,
     user.id,
     "candidate_review_created",
-    "生成七天资料核对邀请与邮件预览；未发送真实邮件。重发会撤销旧链接。",
+    input.sendEmail === true
+      ? "生成七天资料核对邀请，等待 Gmail 发信回执；尚未确认发送。"
+      : "生成七天资料核对邀请与邮件预览；未发送真实邮件。重发会撤销旧链接。",
     now,
   );
   next.revision++;
-  return { state: next, review: summary(review) };
+  return { state: next, review: candidateReviewSummary(review) };
+}
+
+export interface ReviewMailResult {
+  status: "sent" | "failed" | "unknown" | "sending";
+  reason: string;
+  messageId?: string;
+  sentAt?: string;
+}
+
+export function recordCandidateReviewDelivery(
+  state: AppState,
+  reviewId: string,
+  result: ReviewMailResult,
+  clock = new Date(),
+): AppState {
+  const current =
+    state.reviews?.find((item) => item.id === reviewId) ??
+    fail("NOT_FOUND", "核对邀请不存在", 404);
+  if (
+    result.status === "sent" &&
+    (!result.messageId || !/^[a-zA-Z0-9_-]{1,200}$/.test(result.messageId))
+  )
+    fail("INVALID_MAIL_RECEIPT", "缺少有效的 Gmail 发信回执");
+  const delivery = result.status === "sending" ? "pending" : result.status;
+  const reason = result.reason.slice(0, 500);
+  if (
+    current.delivery === "sent" ||
+    (current.delivery === delivery && current.deliveryReason === reason)
+  )
+    return state;
+  const next = structuredClone(state),
+    review = next.reviews!.find((item) => item.id === reviewId)!,
+    app = application(next, review.applicationId);
+  review.delivery = delivery;
+  review.deliveryReason = reason;
+  if (delivery === "sent") {
+    review.providerMessageId = result.messageId;
+    review.sentAt =
+      result.sentAt && Number.isFinite(Date.parse(result.sentAt))
+        ? new Date(result.sentAt).toISOString()
+        : clock.toISOString();
+  }
+  // A later invitation may already own the visible summary; keep its state.
+  if (app.snapshot.review?.reviewId === reviewId)
+    app.snapshot.review = candidateReviewSummary(review);
+  const person = next.candidates.find((item) => item.id === review.candidateId);
+  if (person?.review?.reviewId === reviewId)
+    person.review = candidateReviewSummary(review);
+  audit(
+    next,
+    app,
+    review.createdBy,
+    "candidate_review_delivery",
+    delivery === "sent"
+      ? "Gmail 已接受核对邮件发送并返回消息编号；不代表候选人已收到或阅读。"
+      : `核对邮件状态：${delivery}。${review.deliveryReason}`,
+    clock.toISOString(),
+  );
+  next.revision++;
+  return next;
 }
 
 export function revokeCandidateReview(
@@ -325,7 +409,10 @@ function submittedFields(value: unknown): CandidateReviewFields {
   if (!email && !phone) fail("CONTACT_REQUIRED", "邮箱和手机至少填写一项");
   if (email && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email))
     fail("INVALID_EMAIL", "邮箱格式不正确");
-  if (phone && !/^\+?[\d\s()-]{7,22}$/.test(phone))
+  if (
+    phone &&
+    (!/^\+?[\d\s()-]{7,22}$/.test(phone) || !/^\d{7,15}$/.test(phoneKey(phone)))
+  )
     fail("INVALID_PHONE", "手机格式不正确");
   const education = field("education", 20);
   if (
@@ -375,12 +462,16 @@ export function submitCandidateReview(
   const person =
     state.candidates.find((item) => item.id === current.candidateId) ??
     fail("REVIEW_GONE", "候选人档案已移除", 410);
+  const emailChanged = fields.email !== str(current.fields.email).toLowerCase() &&
+    fields.email !== str(person.email).toLowerCase();
+  const phoneChanged = phoneKey(fields.phone) !== phoneKey(current.fields.phone) &&
+    phoneKey(fields.phone) !== phoneKey(person.phone);
   if (
     state.candidates.some(
       (item) =>
         item.id !== person.id &&
-        ((fields.email && item.email.toLowerCase() === fields.email) ||
-          (fields.phone && phoneKey(item.phone) === phoneKey(fields.phone))),
+        ((emailChanged && fields.email && str(item.email).toLowerCase() === fields.email) ||
+          (phoneChanged && fields.phone && phoneKey(item.phone) === phoneKey(fields.phone))),
     )
   )
     fail("CONTACT_CONFLICT", "联系方式与已有档案冲突，请联系招聘人员核实", 409);
@@ -392,6 +483,25 @@ export function submitCandidateReview(
     JSON.stringify({ ...current.fields, ...fields }) !==
     JSON.stringify(current.fields);
   if (changed) {
+    if (fields.email !== person.email.toLowerCase()) {
+      const applicationIds = new Set(next.applications
+        .filter((item) => item.candidateId === person.id).map((item) => item.id));
+      const interviews = next.interviews.filter((item) => applicationIds.has(item.applicationId));
+      const interviewIds = new Set(interviews.map((item) => item.id));
+      for (const invitation of next.interviewInvitations ?? []) {
+        if (interviewIds.has(invitation.interviewId) && !invitation.revokedAt) {
+          invitation.revokedAt = now;
+          invitation.version++;
+        }
+      }
+      for (const interview of interviews) {
+        if (interview.invitation && !interview.invitation.revokedAt) {
+          interview.invitation.revokedAt = now;
+          interview.invitation.version++;
+        }
+        interview.notified = false;
+      }
+    }
     Object.assign(
       next.candidates.find((item) => item.id === current.candidateId)!,
       fields,
@@ -400,6 +510,7 @@ export function submitCandidateReview(
     if (app.selection) {
       delete app.selection.ruleReview;
       delete app.selection.resumeReview;
+      delete app.selection.aiReview;
       delete app.selection.hrReview;
     }
     app.decision = "pending";

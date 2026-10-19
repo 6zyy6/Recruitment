@@ -9,9 +9,12 @@ import type {
 } from "./domain.ts";
 import { createSeed } from "./seed.ts";
 import { parseCsv } from "./csv.ts";
+import { safeMeetingUrl } from "./interview.ts";
 import { CandidateReviewError, revokeCandidateReview } from "./candidate-review.ts";
 import {
   handleSelectionAction,
+  runRuleReview,
+  screeningPolicy,
   SelectionError,
   SELECTION_ACTIONS,
 } from "./selection.ts";
@@ -69,7 +72,11 @@ function candidateFields(input: Input, now: string): Omit<Candidate, "id"> {
   if (!email && !phone) fail("CONTACT_REQUIRED", "邮箱和手机至少填写一项");
   if (email && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email))
     fail("INVALID_EMAIL", "邮箱格式不正确");
-  if (phone && !/^\+?[\d\s()-]{7,22}$/.test(phone))
+  if (
+    phone &&
+    (!/^\+?[\d\s()-]{7,22}$/.test(phone) ||
+      !/^\d{7,15}$/.test(phone.replace(/\D/g, "")))
+  )
     fail("INVALID_PHONE", "手机格式不正确");
   const yearText =
     str(input.graduationYear) ||
@@ -130,10 +137,27 @@ function restrictCandidate(candidate: Candidate): Candidate {
     review: undefined,
   };
 }
+function invalidateInterviewInvitation(state: AppState, interview: Interview, now: string) {
+  for (const invitation of state.interviewInvitations?.filter(
+    (item) => item.interviewId === interview.id && !item.revokedAt,
+  ) ?? []) {
+    invitation.revokedAt = now;
+    invitation.version++;
+  }
+  if (interview.invitation && !interview.invitation.revokedAt) {
+    interview.invitation.revokedAt = now;
+    interview.invitation.version++;
+  }
+  interview.notified = false;
+}
 
 export function projectState(source: AppState, user: User): AppState {
   const state = structuredClone(source);
   delete state.reviews;
+  delete state.interviewInvitations;
+  delete state.careerSubmissions;
+  if (user.role !== "hr")
+    state.interviews.forEach((interview) => { delete interview.invitation; });
   if (user.role === "admin")
     return {
       ...state,
@@ -387,8 +411,12 @@ export function applyAction(
       joinedAt: "",
     };
     delete app.snapshot.review;
+    app.selection = {
+      assessments: [],
+      ruleReview: runRuleReview(job, app.snapshot, now),
+    };
     state.applications.push(app);
-    event(app, "created", "", "new", `通过${app.source}创建投递`);
+    event(app, "created", "", "new", `通过${app.source}创建投递，已自动完成岗位规则初筛`);
     return app;
   };
   const validateInterview = (app: Application, data: Input, exceptId = "") => {
@@ -397,7 +425,11 @@ export function applyAction(
       fail("INVALID_STAGE", "请先完成筛选并推进到面试阶段");
     const start = iso(data.start, "面试开始时间"),
       end = iso(data.end, "面试结束时间");
-    if (Date.parse(start) < clock.getTime())
+    const previous = state.interviews.find((interview) => interview.id === exceptId);
+    const unchangedTime = previous &&
+      Date.parse(previous.start) === Date.parse(start) &&
+      Date.parse(previous.end) === Date.parse(end);
+    if (Date.parse(start) < clock.getTime() && !unchangedTime)
       fail("PAST_INTERVIEW", "面试开始时间不能早于当前时间");
     if (end <= start || Date.parse(end) - Date.parse(start) > 8 * 3600000)
       fail(
@@ -435,14 +467,44 @@ export function applyAction(
         "该时段面试官或候选人已有面试，请选择其他时间",
         409,
       );
+    if (data.meetingUrl !== undefined && typeof data.meetingUrl !== "string")
+      fail("INVALID_MEETING_URL", "会议链接格式不正确");
+    const meetingUrlInput = typeof data.meetingUrl === "string" ? data.meetingUrl : "";
+    const meetingUrl = safeMeetingUrl(meetingUrlInput);
+    if (meetingUrlInput && !meetingUrl)
+      fail("INVALID_MEETING_URL", "请填写有效的 HTTPS 会议链接，不得包含账号、密码或空白字符");
+    const meetingId = str(data.meetingId),
+      meetingPassword = str(data.meetingPassword);
+    if (meetingId.length > 80) fail("TOO_LONG", "会议号不能超过 80 个字符");
+    if (meetingPassword.length > 100) fail("TOO_LONG", "入会密码不能超过 100 个字符");
     return {
       start,
       end,
       interviewerIds,
-      location: required(data.location, "面试地点 / 会议链接"),
+      location: required(data.location, "面试地点 / 会议平台"),
+      meetingUrl,
+      meetingId,
+      meetingPassword,
     };
   };
+  const screeningApproved = (app: Application) => {
+    if (!app.selection) return;
+    if (
+      app.selection.hrReview?.conclusion !== "pass" ||
+      !app.selection.ruleReview ||
+      !app.selection.resumeReview
+    )
+      fail("SCREENING_APPROVAL_REQUIRED", "请先完成初筛、复筛并由 HR 确认通过");
+    const policy = JSON.stringify(screeningPolicy(jobById(app.jobId)));
+    if (
+      [app.selection.ruleReview, app.selection.resumeReview].some(
+        (report) => !report?.policy || JSON.stringify(report.policy) !== policy,
+      )
+    )
+      fail("SELECTION_REPORT_STALE", "岗位规则已更新，请重新完成初筛、复筛及 HR 确认");
+  };
   const reviewComplete = (app: Application) => {
+    screeningApproved(app);
     const completed = state.interviews.filter(
       (interview) =>
         interview.applicationId === app.id && interview.status === "completed",
@@ -600,6 +662,12 @@ export function applyAction(
       const fields = candidateInput({ ...candidate, ...data });
       if (duplicateCandidate(state, fields, candidate.id))
         fail("DUPLICATE_CANDIDATE", "联系方式与已有候选人重复", 409);
+      if (fields.email.toLowerCase() !== candidate.email.toLowerCase()) {
+        const appIds = new Set(state.applications
+          .filter((app) => app.candidateId === candidate.id).map((app) => app.id));
+        state.interviews.filter((interview) => appIds.has(interview.applicationId))
+          .forEach((interview) => invalidateInterviewInvitation(state, interview, now));
+      }
       Object.assign(candidate, fields, { createdAt: candidate.createdAt });
       state.applications
         .filter((app) => app.candidateId === candidate.id)
@@ -622,6 +690,7 @@ export function applyAction(
       if (from === "new") app.stage = "screening";
       else if (from === "screening") {
         app.screeningNote = required(input.note, "筛选结论");
+        screeningApproved(app);
         app.stage = "interview";
       } else
         fail(
@@ -719,12 +788,13 @@ export function applyAction(
         interview.id,
       );
       Object.assign(interview, fields, { notified: false });
+      invalidateInterviewInvitation(state, interview, now);
       event(
         appById(interview.applicationId),
         "interview_rescheduled",
         "",
         "",
-        "面试已改期，需重新确认通知",
+        "面试安排已更新，需重新确认通知",
       );
       break;
     }
@@ -1187,8 +1257,15 @@ export function applyAction(
       );
       relatedInterviews.forEach((i) => {
         i.location = "个人信息已清理";
+        delete i.meetingUrl;
+        delete i.meetingId;
+        delete i.meetingPassword;
+        delete i.invitation;
       });
       const interviewIds = new Set(relatedInterviews.map((i) => i.id));
+      state.interviewInvitations = state.interviewInvitations?.filter(
+        (invitation) => !interviewIds.has(invitation.interviewId),
+      );
       state.scorecards
         .filter((card) => interviewIds.has(card.interviewId))
         .forEach((card) => {

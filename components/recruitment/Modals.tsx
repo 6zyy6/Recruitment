@@ -525,51 +525,81 @@ export default function Modals({
   if (modal.kind === "schedule" || modal.kind === "reschedule")
     return (
       <Modal
-        title={modal.kind === "schedule" ? "安排面试" : "调整面试时间"}
+        title={modal.kind === "schedule" ? "安排面试" : "调整面试与会议资料"}
         subtitle="时间统一使用北京时间（UTC+8），系统会检查面试官时间冲突。"
         onClose={onClose}
         wide
       >
         <Form
           onClose={onClose}
-          submit={modal.kind === "schedule" ? "确认安排" : "保存新时间"}
+          submit={modal.kind === "schedule" ? "确认安排" : "保存调整"}
           onSubmit={(d) =>
             onAction(
               modal.kind === "schedule"
                 ? "scheduleInterview"
                 : "rescheduleInterview",
-              modal.kind === "schedule"
-                ? {
-                    applicationId: application?.id,
-                    round: text(d, "round"),
-                    start: toISO(text(d, "start")),
-                    end: toISO(text(d, "end")),
-                    interviewerIds: d.getAll("interviewerIds"),
-                    location: text(d, "location"),
-                    confirmed: true,
-                  }
-                : {
-                    interviewId: interview?.id,
-                    start: toISO(text(d, "start")),
-                    end: toISO(text(d, "end")),
-                  },
+              {
+                ...(modal.kind === "schedule"
+                  ? {
+                      applicationId: application?.id,
+                      round: text(d, "round"),
+                      interviewerIds: d.getAll("interviewerIds"),
+                      confirmed: true,
+                    }
+                  : { interviewId: interview?.id }),
+                start: toISO(text(d, "start")),
+                end: toISO(text(d, "end")),
+                location: text(d, "location"),
+                meetingUrl: text(d, "meetingUrl"),
+                meetingId: text(d, "meetingId"),
+                meetingPassword: text(d, "meetingPassword"),
+              },
             )
           }
         >
           {modal.kind === "schedule" && (
-            <>
-              <Field label="面试轮次" required>
-                <input name="round" required defaultValue="专业一面" />
-              </Field>
-              <Field label="面试地点 / 会议链接" required>
-                <input
-                  name="location"
-                  required
-                  placeholder="上海办公室 / 会议链接"
-                />
-              </Field>
-            </>
+            <Field label="面试轮次" required>
+              <input name="round" required defaultValue="专业一面" />
+            </Field>
           )}
+          <Field label="面试地点 / 会议平台" required>
+            <input
+              name="location"
+              required
+              defaultValue={interview?.location}
+              placeholder="如：腾讯会议 / 上海办公室会议室 A"
+            />
+          </Field>
+          <Field
+            label="会议链接"
+            span
+            help="线上面试请粘贴已创建会议的 HTTPS 邀请链接。"
+          >
+            <input
+              name="meetingUrl"
+              type="url"
+              maxLength={2048}
+              defaultValue={interview?.meetingUrl}
+              placeholder="https://meeting.tencent.com/…"
+            />
+          </Field>
+          <Field label="会议号" help="选填，保留会议号中的空格或分隔符">
+            <input
+              name="meetingId"
+              maxLength={80}
+              defaultValue={interview?.meetingId}
+              placeholder="填写真实会议号"
+            />
+          </Field>
+          <Field label="入会密码" help="选填，会议未设置密码时留空">
+            <input
+              name="meetingPassword"
+              maxLength={100}
+              autoComplete="off"
+              defaultValue={interview?.meetingPassword}
+              placeholder="填写入会密码"
+            />
+          </Field>
           <Field label="开始时间（北京时间）" required>
             <input
               name="start"
@@ -612,7 +642,7 @@ export default function Modals({
             </Field>
           )}
           <div className="info-strip full">
-            系统内安排，待人工通知。安排成功后，请通过电话或邮件向候选人确认。
+            请先在腾讯会议等平台创建会议，再填写入会资料；系统不会自动创建会议。保存排期后，可在候选人详情或面试日程中点击「发送面试邀请」，预览邮件后发送。改期后请重新发送邀请。
           </div>
         </Form>
       </Modal>

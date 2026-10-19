@@ -1,6 +1,15 @@
 import assert from 'node:assert/strict';
 
 const baseUrl = (process.env.BASE_URL || 'http://127.0.0.1:5173').replace(/\/$/, '');
+const testSiteUserId = process.env.TEST_SITE_USER_ID;
+const testSiteUserEmail = process.env.TEST_SITE_USER_EMAIL;
+const siteHeaders = {};
+if (testSiteUserId !== undefined || testSiteUserEmail !== undefined) {
+  assert.ok(testSiteUserId?.trim() && testSiteUserEmail?.trim(), 'TEST_SITE_USER_ID and TEST_SITE_USER_EMAIL must both be configured');
+  assert.ok(['127.0.0.1', 'localhost', '[::1]'].includes(new URL(baseUrl).hostname), 'Test Sites identity headers are only allowed against a local server');
+  siteHeaders['oai-authenticated-user-id'] = testSiteUserId.trim();
+  siteHeaders['oai-authenticated-user-email'] = testSiteUserEmail.trim();
+}
 const runId = Date.now().toString(36);
 let passed = 0;
 
@@ -9,8 +18,8 @@ class Session {
   async request(path, body) {
     const response = await fetch(`${baseUrl}${path}`, {
       method: body === undefined ? 'GET' : 'POST',
-      headers: { ...(body === undefined ? {} : { 'content-type': 'application/json' }), ...(this.cookie ? { cookie: this.cookie } : {}) },
-      ...(body === undefined ? {} : { body: JSON.stringify(body) }), signal: AbortSignal.timeout(20_000),
+      headers: { ...(body === undefined ? {} : { 'content-type': 'application/json' }), ...(this.cookie ? { cookie: this.cookie } : {}), ...siteHeaders },
+      ...(body === undefined ? {} : { body: JSON.stringify(body) }), signal: AbortSignal.timeout(65_000),
     });
     const cookies = response.headers.getSetCookie?.() || [response.headers.get('set-cookie')].filter(Boolean);
     if (cookies.length) this.cookie = cookies.map(value => value.split(';')[0]).join('; ');
@@ -121,7 +130,7 @@ async function main() {
     assert.deepEqual(Object.keys(result.data.review).sort(), ['expiresAt', 'id', 'status', 'version']);
     assert.deepEqual(Object.keys(result.data.job).sort(), ['title', 'type']);
     assert.equal(result.data.canSubmit, true);
-    assert.match(result.data.demoNotice, /私有 Demo/);
+    assert.match(result.data.demoNotice, /合成资料/);
     const json = JSON.stringify(result.data);
     for (const forbidden of ['PRIVATE_RESUME', 'PRIVATE_HR_NOTE', 'tokenHash', 'screeningNote', 'assessments', otherApplicationId]) assert.ok(!json.includes(forbidden));
   });
@@ -146,6 +155,7 @@ async function main() {
     await expectError(await anonymous.request('/api/candidate-review', { ...body, expectedVersion: -1 }), 409, 'REVIEW_VERSION_CONFLICT');
     await expectError(await anonymous.request('/api/candidate-review', { ...body, confirmed: false }), 422, 'CONFIRMATION_REQUIRED');
     await expectError(await anonymous.request('/api/candidate-review', { ...body, fields: { ...view.fields, decision: 'hire' } }), 422, 'INVALID_REVIEW_FIELDS');
+    await expectError(await anonymous.request('/api/candidate-review', { ...body, fields: { ...view.fields, email: '', phone: '(((((((' } }), 422, 'INVALID_PHONE');
     assert.equal((await hr.snapshot()).revision, before.revision);
   });
 

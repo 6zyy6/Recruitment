@@ -3,6 +3,7 @@ import assert from "node:assert/strict";
 import type { AppState } from "../lib/domain.ts";
 import { applyAction, BusinessError, projectState } from "../lib/engine.ts";
 import { createSeed } from "../lib/seed.ts";
+import { submitCareerApplication } from "../lib/careers.ts";
 import { CandidateReviewError, candidateReviewFields, createCandidateReview, hashReviewToken, newReviewToken, readCandidateReview, revokeCandidateReview, submitCandidateReview } from "../lib/candidate-review.ts";
 
 const NOW = new Date("2026-10-20T08:00:00.000Z");
@@ -63,7 +64,7 @@ test("token reads only the specified applicant fields, job title and expiry, wit
   assert.deepEqual(Object.keys(view.fields).sort(), ["availability", "education", "email", "graduationYear", "major", "name", "phone", "school", "skills"]);
   assert.equal(view.review.id, issued.review.reviewId);
   assert.equal(view.canSubmit, true);
-  assert.match(view.demoNotice, /私有 Demo/);
+  assert.match(view.demoNotice, /合成资料/);
   const json = JSON.stringify(view);
   for (const forbidden of ["HR_PRIVATE_NOTE", "PRIVATE_RAW_RESUME", "OTHER_PERSON_SECRET", issued.tokenHash, "scorecards", "decisionNote"]) assert.ok(!json.includes(forbidden));
 });
@@ -91,6 +92,20 @@ test("confirmation is explicit; invalid fields and injected state fields fail at
   rejects(() => submitCandidateReview(issued.state, issued.tokenHash, { ...body, fields: { ...body.fields, graduationYear: "2027" } }, NOW), "INVALID_YEAR");
   rejects(() => submitCandidateReview(issued.state, issued.tokenHash, { ...body, fields: { ...body.fields, skills: [" "] } }, NOW), "INVALID_SKILLS");
   assert.equal(JSON.stringify(issued.state), before);
+});
+
+test("phone-only contact requires 7–15 digits and still accepts international formatting", async () => {
+  const issued = await invite(), before = JSON.stringify(issued.state);
+  const body = { expectedVersion: 0, confirmed: true, fields: { ...form(issued.state), email: "" } };
+  for (const phone of ["(((((((", "-------", "+( )-12", "123456", "1234567890123456"]) {
+    rejects(() => submitCandidateReview(issued.state, issued.tokenHash, { ...body, fields: { ...body.fields, phone } }, NOW), "INVALID_PHONE");
+    assert.equal(JSON.stringify(issued.state), before);
+  }
+  for (const phone of ["13912345678", "+86 139-1234-5678", "+1 (415) 555-2671", "123456789012345"]) {
+    const next = submitCandidateReview(issued.state, issued.tokenHash, { ...body, fields: { ...body.fields, phone } }, NOW);
+    assert.equal(app(next).snapshot.phone, phone);
+    assert.equal(app(next).snapshot.email, "");
+  }
 });
 
 test("candidate submission updates only its application and main record, invalidates reviews and never advances", async () => {
@@ -171,8 +186,52 @@ test("record versions reject stale submissions and HR edits require a fresh invi
 });
 
 test("contact conflicts cannot overwrite another person, even when the applicant confirms", async () => {
-  const issued = await invite(), other = issued.state.candidates.find(item => item.id !== app(issued.state).candidateId)!;
+  const issued = await invite(), other = issued.state.candidates.find(item => item.id !== app(issued.state).candidateId)!, before = JSON.stringify(issued.state);
   rejects(() => submitCandidateReview(issued.state, issued.tokenHash, { expectedVersion: 0, confirmed: true, fields: { ...form(issued.state), email: other.email } }, NOW), "CONTACT_CONFLICT", 409);
+  rejects(() => submitCandidateReview(issued.state, issued.tokenHash, { expectedVersion: 0, confirmed: true, fields: { ...form(issued.state), phone: `+${other.phone.slice(0, 3)} ${other.phone.slice(3)}` } }, NOW), "CONTACT_CONFLICT", 409);
+  assert.equal(JSON.stringify(issued.state), before);
+});
+
+test("independent public applications sharing contacts can confirm or edit other fields without merging profiles", async () => {
+  const candidate = { name: "合成跨岗应聘者", email: "shared-public-review@example.com", phone: "+1 (650) 555-0198", resume: "仅用于验证跨岗自助投递的合成简历。" };
+  const first = await submitCareerApplication(seed(), { requestId: crypto.randomUUID(), jobId: "job_1", candidate, consent: true }, NOW);
+  const target = first.state.applications.at(-1)!;
+  const second = await submitCareerApplication(first.state, { requestId: crypto.randomUUID(), jobId: "job_2", candidate, consent: true }, NOW);
+  const otherApp = second.state.applications.at(-1)!;
+  assert.notEqual(target.candidateId, otherApp.candidateId);
+  const issued = await invite(second.state, target.id), before = JSON.stringify(issued.state);
+  const view = readCandidateReview(issued.state, issued.tokenHash, NOW);
+  assert.equal(view.canSubmit, true);
+  for (const patch of [{}, { name: "核对后的合成姓名" }, { email: candidate.email.toUpperCase(), phone: "+1 650-555-0198" }]) {
+    const next = submitCandidateReview(issued.state, issued.tokenHash, { expectedVersion: 0, confirmed: true, fields: { ...view.fields, ...patch } }, NOW);
+    assert.equal(app(next, target.id).snapshot.review!.status, "submitted");
+    assert.equal(next.candidates.length, issued.state.candidates.length);
+    assert.deepEqual(app(next, otherApp.id), app(issued.state, otherApp.id));
+    assert.deepEqual(next.candidates.find(item => item.id === otherApp.candidateId), issued.state.candidates.find(item => item.id === otherApp.candidateId));
+    assert.equal(JSON.stringify(issued.state), before);
+  }
+  const changed = structuredClone(issued.state);
+  changed.candidates.find(item => item.id === target.candidateId)!.email = "hr-corrected-contact@example.com";
+  rejects(() => submitCandidateReview(changed, issued.tokenHash, { expectedVersion: 0, confirmed: true, fields: view.fields }, NOW), "REVIEW_DATA_CHANGED", 409);
+});
+
+test("contacts already owned by the invitation snapshot or current master record are not new conflicts", async () => {
+  const state = seed(), person = state.candidates.find(item => item.id === app(state).candidateId)!;
+  const snapshotContact = { email: app(state).snapshot.email, phone: app(state).snapshot.phone };
+  const others = state.candidates.filter(item => item.id !== person.id);
+  Object.assign(others[0], snapshotContact);
+  person.email = "current-master-contact@example.com";
+  person.phone = "+1 202-555-0148";
+  const masterContact = { email: person.email, phone: person.phone };
+  Object.assign(others[1], masterContact);
+  const issued = await invite(state), before = structuredClone(issued.state.candidates.filter(item => item.id !== person.id));
+  const fields = readCandidateReview(issued.state, issued.tokenHash, NOW).fields;
+  for (const contact of [snapshotContact, masterContact]) {
+    const next = submitCandidateReview(issued.state, issued.tokenHash, { expectedVersion: 0, confirmed: true,
+      fields: { ...fields, ...contact, name: "仅更正合成姓名" } }, NOW);
+    assert.equal(app(next).snapshot.review!.status, "submitted");
+    assert.deepEqual(next.candidates.filter(item => item.id !== person.id), before);
+  }
 });
 
 test("revoke action uses existing HR authorization and revision contract", async () => {

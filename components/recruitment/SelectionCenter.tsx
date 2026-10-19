@@ -1,6 +1,6 @@
 "use client";
 
-import { useMemo, useState, type FormEvent, type ReactNode } from "react";
+import { useEffect, useMemo, useRef, useState, type FormEvent, type ReactNode } from "react";
 import {
   ListFilter,
   ClipboardCheck,
@@ -82,11 +82,11 @@ const splitList = (value: FormDataEntryValue | null) =>
     .split(/[,，;；\n]/)
     .map((s) => s.trim())
     .filter(Boolean);
-function ModelLabel() {
+function ModelLabel({ report }: { report?: SelectionReport }) {
   return (
     <span className="sel-model-label">
       <Sparkles size={12} />
-      规则模拟 · 未调用大模型
+      {report?.mode === "llm" ? "大模型分析" : "规则模拟 · 未调用大模型"}
     </span>
   );
 }
@@ -125,7 +125,9 @@ function Card({
 function reviewLabel(application: Application) {
   if (application.selection?.hrReview)
     return reviewNames[application.selection.hrReview.conclusion];
-  if (application.selection?.resumeReview) return "待 HR 复核";
+  if (application.selection?.resumeReview?.mode === "llm") return "待 HR 复核";
+  if (application.selection?.aiReview?.status === "failed") return "AI 复筛失败";
+  if (["pending", "running"].includes(application.selection?.aiReview?.status || "")) return "AI 复筛中";
   if (application.selection?.ruleReview) return "待简历复筛";
   if (!["new", "screening"].includes(application.stage)) return "沿用既有流程";
   return "未开始初筛";
@@ -190,6 +192,7 @@ function SelectionWorkspace({
   const [answerTaskId, setAnswerTaskId] = useState("");
   const [expandedTaskIds, setExpandedTaskIds] = useState<string[]>([]);
   const [busy, setBusy] = useState("");
+  const attemptedReviews = useRef(new Set<string>());
   const [notice, setNotice] = useState<{
     message: string;
     error: boolean;
@@ -233,7 +236,7 @@ function SelectionWorkspace({
   const ruleCurrent =
     !!job && reportIsCurrent(application?.selection?.ruleReview, job);
   const resumeCurrent =
-    !!job && reportIsCurrent(application?.selection?.resumeReview, job);
+    !!job && application?.selection?.resumeReview?.mode === "llm" && reportIsCurrent(application.selection.resumeReview, job);
   const scopeApplications = state.applications.filter(
     (a) => !jobId || a.jobId === jobId,
   );
@@ -276,6 +279,30 @@ function SelectionWorkspace({
   ) => {
     void execute(name, fields, message).catch(() => undefined);
   };
+  useEffect(() => {
+    if (
+      !actionable ||
+      !application ||
+      application.snapshot.restricted ||
+      application.source === "个人信息已清理" ||
+      application.snapshot.resume === "个人信息已清理" ||
+      (application.selection?.resumeReview?.mode === "llm" && !!job && reportIsCurrent(application.selection.resumeReview, job)) ||
+      ["failed", "blocked", "running"].includes(application.selection?.aiReview?.status || "") ||
+      attemptedReviews.current.has(application.id)
+    ) return;
+    attemptedReviews.current.add(application.id);
+    async function ensureReview() {
+      setBusy("ensure_resume_review");
+      try {
+        await onAction("ensure_resume_review", { applicationId: application.id });
+      } catch (error) {
+        setNotice({ message: error instanceof Error ? error.message : "自动复筛未完成，请重试。", error: true });
+      } finally {
+        setBusy("");
+      }
+    }
+    void ensureReview();
+  }, [application, actionable, job, onAction]);
   function toggleTask(id: string) {
     setExpandedTaskIds((ids) =>
       ids.includes(id) ? ids.filter((x) => x !== id) : [...ids, id],
@@ -622,57 +649,20 @@ function SelectionWorkspace({
                   </Card>
                   <Card
                     number={2}
-                    title="简历辅助复筛"
-                    subtitle="基于显式规则整理证据、缺口与建议问题"
-                    action={<ModelLabel />}
-                    footer={
-                      <>
-                        <small>
-                          {application.selection?.resumeReview
-                            ? `报告生成于 ${dateTime(application.selection.resumeReview.createdAt)}`
-                            : "先完成当前岗位规则核对，再生成简历复筛报告"}
-                        </small>
-                        {actionable && (
-                          <button
-                            className="button small"
-                            disabled={!!busy || !ruleCurrent}
-                            title={
-                              !ruleCurrent
-                                ? "请先执行当前岗位规则核对"
-                                : undefined
-                            }
-                            onClick={() =>
-                              run(
-                                "review_resume",
-                                { applicationId: application.id },
-                                "简历规则演示报告已生成，等待 HR 独立复核。",
-                              )
-                            }
-                          >
-                            {busy === "review_resume" ? (
-                              <Spinner />
-                            ) : (
-                              <FileSearch size={14} />
-                            )}
-                            生成复筛报告
-                          </button>
-                        )}
-                      </>
-                    }
+                    title="AI 简历复筛"
+                    subtitle="初筛完成后自动分析岗位匹配证据，缺项与未知信息交 AI 及 HR 核实"
+                    action={application.selection?.resumeReview?.mode === "llm" ? <ModelLabel report={application.selection.resumeReview} /> : undefined}
                   >
-                    {application.selection?.resumeReview ? (
-                      <ReportContent
-                        report={application.selection.resumeReview}
-                      />
-                    ) : (
-                      <div className="sel-empty-report">
-                        <FileSearch size={27} />
-                        <h4>把简历证据放在评分旁边</h4>
-                        <p>
-                          演示评分来自技能覆盖、资料完整性等确定性规则，不代表模型推理、候选人潜力或实际录用建议。
-                        </p>
-                      </div>
-                    )}
+                    <ResumeReviewContent
+                      application={application}
+                      pending={busy === "review_resume" || busy === "ensure_resume_review" || busy === "run_screening"}
+                      disabled={!!busy}
+                      canReview={actionable && !application.snapshot.restricted && application.source !== "个人信息已清理" && application.snapshot.resume !== "个人信息已清理"}
+                      ruleCurrent={ruleCurrent}
+                      onReview={() => run("review_resume", { applicationId: application.id }, "AI 复筛请求已处理，请查看报告状态。")}
+                      onScreen={() => run("run_screening", { applicationId: application.id }, "初筛已完成，自动请求 AI 复筛，缺项与未知信息交 AI 及 HR 核实。")}
+                      onVerify={() => setVerifyOpen(true)}
+                    />
                   </Card>
                   <Card
                     number={3}
@@ -964,7 +954,135 @@ function SelectionWorkspace({
   );
 }
 
-function reportIsCurrent(report: SelectionReport | undefined, job: Job) {
+export function ResumeReviewContent({
+  application,
+  pending = false,
+  disabled = false,
+  canReview,
+  ruleCurrent = true,
+  onReview,
+  onScreen,
+  onVerify,
+}: {
+  application: Application;
+  pending?: boolean;
+  disabled?: boolean;
+  canReview: boolean;
+  ruleCurrent?: boolean;
+  onReview: () => void;
+  onScreen: () => void;
+  onVerify: () => void;
+}) {
+  const selection = application.selection;
+  const report = selection?.resumeReview;
+  const realReport = report?.mode === "llm" && ruleCurrent ? report : undefined;
+  const rule = selection?.ruleReview;
+  const screeningComplete = !!rule && rule.kind === "rule" && rule.evidence.length > 0;
+  const generating = pending || ["pending", "running"].includes(selection?.aiReview?.status || "");
+  const failed = selection?.aiReview?.status === "failed";
+  const hasResume = !!application.snapshot.resume.trim() && application.snapshot.resume !== "个人信息已清理";
+  const label = generating ? "正在生成" : realReport ? "已完成" : failed ? "生成失败" : "待复筛";
+  const title = failed
+    ? "AI 复筛暂未完成"
+    : !screeningComplete || !ruleCurrent
+      ? "先完成岗位初筛"
+      : !hasResume
+        ? "等待上传简历"
+        : "初筛已完成，等待 AI 复筛";
+  const hint = selection?.aiReview?.message || (
+    !screeningComplete || !ruleCurrent
+      ? "完成岗位初筛后自动分析简历中的匹配证据，缺项与未知信息交 AI 及 HR 核实。"
+      : !hasResume
+        ? "上传或填写简历文本后，即可生成岗位匹配分析。"
+        : "将根据当前岗位要求和这次投递的简历生成分析，缺项与未知信息交 AI 及 HR 核实。"
+  );
+  return (
+    <div className="resume-review" aria-busy={generating}>
+      <div className="resume-review-status">
+        <span className={`resume-review-indicator ${generating ? "pending" : realReport ? "complete" : failed ? "failed" : ""}`}>
+          {generating ? <Spinner /> : realReport ? <CheckCircle2 size={17} /> : failed ? <AlertCircle size={17} /> : <FileSearch size={17} />}
+          <strong>{label}</strong>
+        </span>
+        {realReport && !generating && <small>基于当前投递简历</small>}
+      </div>
+      {generating ? (
+        <div className="resume-review-empty" role="status">
+          <h4>正在分析岗位匹配证据</h4>
+          <p>完成后会在这里展示报告，通常需要几十秒。</p>
+        </div>
+      ) : realReport ? (
+        <ResumeReport report={realReport} />
+      ) : (
+        <div className="resume-review-empty">
+          <h4>{title}</h4>
+          <p>{hint}</p>
+          {canReview && (
+            <button
+              className="button small primary"
+              disabled={disabled}
+              onClick={!screeningComplete || !ruleCurrent ? onScreen : !hasResume ? onVerify : onReview}
+            >
+              {!screeningComplete || !ruleCurrent ? "执行岗位初筛" : !hasResume ? "核实投递资料" : failed || selection?.aiReview?.status === "blocked" ? "重试生成" : report ? "使用真实 AI 复筛" : "生成 AI 复筛"}
+            </button>
+          )}
+        </div>
+      )}
+      {report?.mode === "rule_demo" && !generating && (
+        <details className="resume-review-details resume-review-history">
+          <summary>历史演示报告</summary>
+          <p>{report.summary}</p>
+          <small>由固定规则生成，未调用大模型 · {dateTime(report.createdAt)}</small>
+        </details>
+      )}
+      {report?.mode === "llm" && !ruleCurrent && !generating && (
+        <details className="resume-review-details resume-review-history">
+          <summary>历史 AI 报告 · 岗位条件已更新</summary>
+          <ResumeReport report={report} />
+        </details>
+      )}
+    </div>
+  );
+}
+
+function ResumeReport({ report }: { report: SelectionReport }) {
+  const supported = report.evidence.filter((item) => item.status === "matched").length;
+  const needsVerification = report.evidence.filter((item) => item.status === "missing" || item.status === "unknown").length;
+  const informational = report.evidence.filter((item) => item.status === "info").length;
+  const questions = report.questions || [];
+  const labels = { matched: "有依据", missing: "证据缺口", unknown: "待核实", info: "参考" };
+  return (
+    <div className="resume-review-report">
+      <p className="resume-review-summary">{report.summary}</p>
+      <div className="resume-review-counts">
+        <span><strong>{supported}</strong> 项有依据</span>
+        <span><strong>{needsVerification}</strong> 项待核实</span>
+        {informational > 0 && <span><strong>{informational}</strong> 项参考</span>}
+      </div>
+      <ul className="resume-review-evidence">
+        {report.evidence.map((item, index) => (
+          <li key={index}>
+            <div><h4>{item.label}</h4><Badge tone={evidenceTone[item.status]}>{labels[item.status]}</Badge></div>
+            {item.reason && <p>{item.reason}</p>}
+            {item.quote.trim() && item.quote.trim() !== "简历未提供相关依据" ? <blockquote><span>简历原文</span>{item.quote}</blockquote> : <small>简历中未找到直接证据</small>}
+          </li>
+        ))}
+      </ul>
+      {(report.gaps.length > 0 || questions.length > 0) && (
+        <details className="resume-review-details">
+          <summary>缺口与建议核实问题 <span>{report.gaps.length + questions.length} 项</span></summary>
+          {report.gaps.length > 0 && <><h5>需要补充的证据</h5><ul>{report.gaps.map((gap, index) => <li key={index}>{gap}</li>)}</ul></>}
+          {questions.length > 0 && <><h5>建议核实问题</h5><ol>{questions.map((question, index) => <li key={index}>{question}</li>)}</ol></>}
+        </details>
+      )}
+      <div className="resume-review-meta">
+        <span>{report.model || "大模型分析"} · {dateTime(report.createdAt)}</span>
+        <span>AI 辅助分析，最终结论由 HR 确认。</span>
+      </div>
+    </div>
+  );
+}
+
+export function reportIsCurrent(report: SelectionReport | undefined, job: Job) {
   if (!report?.policy) return false;
   const policy = job.screeningPolicy || {
     minimumEducation: "any",
@@ -983,6 +1101,7 @@ function reportIsCurrent(report: SelectionReport | undefined, job: Job) {
 }
 
 function EvidenceTable({ report }: { report: SelectionReport }) {
+  if (report.mode === "llm") return <ResumeReport report={report} />;
   return (
     <div className="table-scroll">
       <small className="sel-history-meta">
@@ -1005,6 +1124,7 @@ function EvidenceTable({ report }: { report: SelectionReport }) {
               <td>{e.label}</td>
               <td>
                 {e.quote || "未提供可核实信息"}
+                {e.reason && <small>{e.reason}</small>}
                 {e.points !== undefined && (
                   <small>
                     规则计分 {e.points} / {e.maxPoints ?? "—"}
@@ -1013,7 +1133,7 @@ function EvidenceTable({ report }: { report: SelectionReport }) {
               </td>
               <td>
                 <Badge tone={evidenceTone[e.status]}>
-                  {evidenceNames[e.status]}
+                  {report.kind === "rule" && e.status === "matched" ? "命中线索" : evidenceNames[e.status]}
                 </Badge>
               </td>
             </tr>
@@ -1030,6 +1150,7 @@ function EvidenceTable({ report }: { report: SelectionReport }) {
   );
 }
 function ReportContent({ report }: { report: SelectionReport }) {
+  if (report.mode === "llm") return <ResumeReport report={report} />;
   const matched = report.evidence.filter(
     (e) => e.status === "matched" || e.status === "info",
   );

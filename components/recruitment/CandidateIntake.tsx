@@ -21,6 +21,11 @@ import {
   ArrowRight,
   X,
 } from "lucide-react";
+import {
+  DeliveryStatus,
+  mailDeliveryLabel,
+  type MailDelivery,
+} from "./CandidateReviewInvite";
 import type { AppState, Snapshot, User } from "@/lib/domain";
 import { extractResumeFile, MAX_RESUME_BYTES } from "@/lib/resume-file";
 import { parseResumeText, type ResumeFields } from "@/lib/resume-parser";
@@ -59,6 +64,7 @@ type Invitation = {
     reason: string;
   };
   snapshot: Snapshot;
+  mailDelivery?: MailDelivery;
 };
 const blankFields: ResumeFields = {
   name: "",
@@ -113,6 +119,11 @@ export default function CandidateIntake({
   const [createdId, setCreatedId] = useState("");
   const [invitation, setInvitation] = useState<Invitation | null>(null);
   const [copied, setCopied] = useState(false);
+  const [delivery, setDelivery] = useState<MailDelivery | null>(null);
+  const [configLink, setConfigLink] = useState("");
+  const [signInUrl, setSignInUrl] = useState("");
+  const uncertain =
+    delivery?.status === "unknown" || delivery?.status === "sending";
   const fileInput = useRef<HTMLInputElement>(null);
   const generation = useRef(0);
   const mounted = useRef(true);
@@ -206,7 +217,18 @@ export default function CandidateIntake({
     );
   }
   async function requestInvitation(applicationId: string) {
-    for (let attempt = 0; attempt < 2; attempt++) {
+    let responseStatus = 0;
+    let deliverySet = false;
+    if (mounted.current) {
+      setConfigLink("");
+      setSignInUrl("");
+      setInvitation(null);
+      setDelivery({
+        status: "sending",
+        reason: "正在提交核对邮件发送请求，请等待服务端返回结果。",
+      });
+    }
+    try {
       const response = await fetch("/api/candidate-review", {
         method: "POST",
         headers: { "content-type": "application/json" },
@@ -214,29 +236,57 @@ export default function CandidateIntake({
           action: "createCandidateReview",
           applicationId,
           expectedRevision: latestSnapshot.current.state.revision,
+          sendEmail: true,
         }),
       });
-      const data = (await response.json()) as Invitation & { message?: string };
-      if (response.status === 409 && attempt === 0) {
-        const refresh = await fetch("/api/recruitment", { cache: "no-store" });
-        const fresh = (await refresh.json()) as Snapshot & { message?: string };
-        if (!refresh.ok)
-          throw new Error(fresh.message || "刷新资料失败，请关闭后重新邀请。");
-        latestSnapshot.current = fresh;
-        continue;
+      responseStatus = response.status;
+      const data = (await response.json()) as Partial<Invitation> & {
+        message?: string;
+        connectUrl?: string;
+        signInUrl?: string;
+      };
+      if (data.snapshot) latestSnapshot.current = data.snapshot;
+      if (mounted.current) {
+        if (data.mailDelivery) {
+          setDelivery(data.mailDelivery);
+          deliverySet = true;
+        }
+        if (data.signInUrl) setSignInUrl(data.signInUrl);
+        if (data.connectUrl || response.status === 503)
+          setConfigLink(data.connectUrl || "/mail-connect");
+        if (data.reviewUrl && data.mailPreview && data.review && data.snapshot)
+          setInvitation(data as Invitation);
       }
       if (!response.ok)
-        throw new Error(data.message || "核对邀请尚未生成，请重试邀请。");
-      latestSnapshot.current = data.snapshot;
-      if (mounted.current) setInvitation(data);
-      return;
+        throw new Error(
+          data.message || "发送请求未完成，请核实 Gmail 已发送记录。",
+        );
+      if (mounted.current && !data.mailDelivery)
+        setDelivery({
+          status: "preview",
+          reason: "服务端未返回 Gmail 发送确认，仅显示已生成的预览。",
+        });
+    } catch (cause) {
+      if (mounted.current && !deliverySet)
+        setDelivery({
+          status: [400, 401, 403, 404, 422, 503].includes(responseStatus)
+            ? "failed"
+            : "unknown",
+          reason: responseStatus
+            ? cause instanceof Error
+              ? cause.message
+              : "发送请求未完成。"
+            : "未取得服务端发送结果，邮件可能已被 Gmail 接受。请先核实已发送记录。",
+        });
+      throw cause;
     }
   }
   async function retryInvitation() {
     if (
       !createdRef.current ||
       createdRef.current === "saved" ||
-      savingRef.current
+      savingRef.current ||
+      uncertain
     )
       return;
     savingRef.current = true;
@@ -249,7 +299,7 @@ export default function CandidateIntake({
         setError(
           cause instanceof Error
             ? cause.message
-            : "核对邀请生成失败，请稍后重试。",
+            : "发送请求未完成，请先核实当前状态。",
         );
     } finally {
       savingRef.current = false;
@@ -265,7 +315,7 @@ export default function CandidateIntake({
     }
     if (invite && !fields.email.trim()) {
       setError(
-        "邀请候选人核对需要邮箱；请补充邮箱，或选择“仅保存，稍后邀请”。",
+        "发送候选人核对邮件需要邮箱；请补充邮箱，或选择“仅保存，稍后邀请”。",
       );
       return;
     }
@@ -364,7 +414,7 @@ export default function CandidateIntake({
       title={createdId ? "档案与候选人核对" : "上传简历，建立候选人档案"}
       subtitle={
         createdId
-          ? "创建与邀请分别保存；邀请失败可单独重试，无需重复建档。"
+          ? "创建与发送分别保存；发送结果不确定时，请先核实 Gmail 已发送记录。"
           : "上传后自动填入资料，建档并邀请候选人自行核对。"
       }
       onClose={close}
@@ -384,16 +434,34 @@ export default function CandidateIntake({
                 </div>
                 <Badge tone="green">已保存</Badge>
               </div>
+              {delivery && <DeliveryStatus delivery={delivery} />}
+              {uncertain && (
+                <div className="mail-delivery-actions">
+                  <a
+                    className="button"
+                    href="https://mail.google.com/mail/#sent"
+                    target="_blank"
+                    rel="noreferrer noopener"
+                  >
+                    <ExternalLink size={15} />
+                    核实 Gmail 已发送
+                  </a>
+                  <span>
+                    请关闭后刷新候选人详情核实发送状态；需要重新发送时，先明确撤销旧邀请。
+                  </span>
+                </div>
+              )}
               {invitation ? (
                 <>
                   <div className="intake-invite-state">
                     <Mail size={18} />
                     <div>
-                      <strong>核对邮件预览已生成，尚未发送</strong>
-                      <p>
-                        {invitation.mailPreview.reason ||
-                          "当前未配置邮件服务，仅生成预览和核对链接。"}
-                      </p>
+                      <strong>
+                        {delivery
+                          ? mailDeliveryLabel(delivery)
+                          : "核对邮件内容已生成"}
+                      </strong>
+                      <p>核对链接仅对应本次投递，7 天有效，请勿转发。</p>
                     </div>
                   </div>
                   <div className="intake-mail">
@@ -412,7 +480,7 @@ export default function CandidateIntake({
                   </div>
                   <Field
                     label="候选人核对链接"
-                    help="链接包含私密令牌，仅用于本次合成资料核对。当前私有演示站点的真实外部收件人无法直接访问。"
+                    help="核对链接仅对应本次投递，7 天有效，请勿转发。"
                   >
                     <input
                       readOnly
@@ -438,19 +506,22 @@ export default function CandidateIntake({
                       <ExternalLink size={15} />
                       打开候选人演示页
                     </a>
-                    <a
-                      className="button"
-                      href={gmailUrl()}
-                      target="_blank"
-                      rel="noreferrer noopener"
-                    >
-                      <Mail size={15} />在 Gmail 中打开核对邮件
-                    </a>
+                    {delivery &&
+                      ["failed", "preview"].includes(delivery.status) && (
+                        <a
+                          className="button"
+                          href={gmailUrl()}
+                          target="_blank"
+                          rel="noreferrer noopener"
+                        >
+                          <Mail size={15} />
+                          备用：在 Gmail 打开草稿
+                        </a>
+                      )}
                   </div>
                   <p className="intake-gmail-note">
                     最后在 Gmail
-                    确认发送；系统不会将打开草稿计为已发送。当前私有 Demo
-                    的核对链接仍受站点访问权限限制。
+                    确认发送；系统不会将打开草稿计为已发送。核对链接仅用于合成资料演示，请勿转发或填写真实个人资料。
                   </p>
                 </>
               ) : (
@@ -459,29 +530,62 @@ export default function CandidateIntake({
                   <div>
                     <strong>
                       {invite
-                        ? "档案已保存，核对邀请尚未生成"
+                        ? "档案已保存，发送请求尚未完成"
                         : "已仅保存档案，尚未邀请核对"}
                     </strong>
                     <p>
                       {invite
-                        ? "可重试生成邀请；此操作只生成核对链接和邮件预览，不重复创建候选人。"
+                        ? uncertain
+                          ? "发送结果待核实，请先到 Gmail 检查已发送记录。"
+                          : "确认未发送后可重新点击发送；此操作不会重复创建候选人。"
                         : "稍后可在候选人详情中生成核对邀请。"}
                     </p>
                   </div>
                 </div>
               )}
               <ErrorMessage message={error} />
+              {(configLink || signInUrl) && (
+                <div className="mail-delivery-actions">
+                  {configLink && (
+                    <a
+                      className="button"
+                      href={configLink}
+                      target="_blank"
+                      rel="noreferrer noopener"
+                    >
+                      <Mail size={15} />
+                      配置发件 Gmail
+                    </a>
+                  )}
+                  {signInUrl && (
+                    <a
+                      className="button primary"
+                      href={signInUrl}
+                      target="_top"
+                    >
+                      以站点所有者身份登录
+                      <ExternalLink size={15} />
+                    </a>
+                  )}
+                </div>
+              )}
             </div>
             <div className="modal-footer">
-              {!invitation && invite && createdId !== "saved" && (
-                <button
-                  className="button primary"
-                  disabled={saving}
-                  onClick={retryInvitation}
-                >
-                  {saving ? <Spinner /> : <RotateCcw size={15} />}仅重试邀请
-                </button>
-              )}
+              {invite &&
+                createdId !== "saved" &&
+                !uncertain &&
+                (!delivery ||
+                  delivery.status === "failed" ||
+                  delivery.status === "preview") && (
+                  <button
+                    className="button primary"
+                    disabled={saving}
+                    onClick={retryInvitation}
+                  >
+                    {saving ? <Spinner /> : <RotateCcw size={15} />}
+                    确认重新发送核对邮件
+                  </button>
+                )}
               <button
                 className={invitation || !invite ? "button primary" : "button"}
                 onClick={close}
@@ -798,10 +902,10 @@ export default function CandidateIntake({
                     disabled={saving}
                   />
                   <span>
-                    <strong>邀请候选人核对资料</strong>
+                    <strong>建档后发送资料核对邮件</strong>
                     <small>
                       {invite
-                        ? "创建档案后生成核对链接和邮件预览；当前未配置邮件服务，不会实际发送。"
+                        ? "点击下方创建并发送按钮后，将通过已连接 Gmail 发送到上方邮箱。发送前请核实收件地址。"
                         : "仅保存，稍后邀请。不会为本次操作生成核对链接。"}
                     </small>
                   </span>
@@ -817,6 +921,31 @@ export default function CandidateIntake({
                 <ErrorMessage message="当前没有可接收投递的职位，请先创建并发布职位。" />
               )}
               <ErrorMessage message={error} />
+              {(configLink || signInUrl) && (
+                <div className="mail-delivery-actions">
+                  {configLink && (
+                    <a
+                      className="button"
+                      href={configLink}
+                      target="_blank"
+                      rel="noreferrer noopener"
+                    >
+                      <Mail size={15} />
+                      配置发件 Gmail
+                    </a>
+                  )}
+                  {signInUrl && (
+                    <a
+                      className="button primary"
+                      href={signInUrl}
+                      target="_top"
+                    >
+                      以站点所有者身份登录
+                      <ExternalLink size={15} />
+                    </a>
+                  )}
+                </div>
+              )}
             </div>
             <div className="modal-footer">
               <button type="button" className="button" onClick={close}>
@@ -836,7 +965,7 @@ export default function CandidateIntake({
                 {saving
                   ? "正在保存…"
                   : invite
-                    ? "创建档案并邀请核对"
+                    ? "创建档案并发送核对邮件"
                     : "仅保存，稍后邀请"}
               </button>
             </div>

@@ -1,5 +1,5 @@
 "use client";
-import { useEffect, useMemo, useState, type ReactNode } from "react";
+import { useEffect, useEffectEvent, useMemo, useRef, useState, type ReactNode } from "react";
 import {
   LayoutDashboard,
   Briefcase,
@@ -30,6 +30,8 @@ import {
   LogOut,
   ExternalLink,
   ListFilter,
+  Copy,
+  Video,
 } from "lucide-react";
 import type {
   AppState,
@@ -42,9 +44,11 @@ import type {
 } from "@/lib/domain";
 import { STAGES, STAGE_LABELS, ROLE_LABELS } from "@/lib/domain";
 import { getMetrics } from "@/lib/metrics";
+import { safeMeetingUrl } from "@/lib/interview";
 import Modals from "./Modals";
-import SelectionCenter from "./SelectionCenter";
+import SelectionCenter, { ResumeReviewContent, reportIsCurrent } from "./SelectionCenter";
 import CandidateReviewInvite from "./CandidateReviewInvite";
+import InterviewInvite from "./InterviewInvite";
 import {
   Avatar,
   Badge,
@@ -85,7 +89,7 @@ const titles: Record<Page, string> = {
   interviews: "面试日程",
   offers: "录用与入职",
   analytics: "招聘分析",
-  settings: "演示空间",
+  settings: "项目说明与设置",
 };
 const stageTone: Record<Stage, string> = {
   new: "neutral",
@@ -142,6 +146,8 @@ export default function Workspace() {
     [busy, setBusy] = useState(false),
     [error, setError] = useState(""),
     [toast, setToast] = useState("");
+  const [reviewingAppId, setReviewingAppId] = useState("");
+  const attemptedReviews = useRef(new Set<string>());
   const [page, setPage] = useState<Page>("overview"),
     [type, setType] = useState<"all" | "social" | "campus">("all"),
     [query, setQuery] = useState(""),
@@ -179,8 +185,10 @@ export default function Workspace() {
     setError("");
     try {
       setSnapshot(await request<Snapshot>("/api/recruitment"));
+      return true;
     } catch (e) {
       setError(e instanceof Error ? e.message : "加载失败");
+      return false;
     }
   }
   useEffect(() => {
@@ -277,7 +285,7 @@ export default function Workspace() {
       throw new Error(data.message || "操作未完成");
     }
     setSnapshot(data);
-    setToast("已保存，流程记录已更新");
+    if (name !== "ensure_resume_review") setToast("已保存，流程记录已更新");
     return data as Snapshot;
   }
   async function run(name: string, fields: Record<string, unknown> = {}) {
@@ -305,6 +313,35 @@ export default function Workspace() {
     () => (state ? getMetrics(state, { type, batch, jobId, query }) : null),
     [state, type, batch, jobId, query],
   );
+  const ensureResumeReview = useEffectEvent(async (applicationId: string) => {
+    setReviewingAppId(applicationId);
+    try {
+      await action("ensure_resume_review", { applicationId });
+    } catch (error) {
+      setToast(error instanceof Error ? error.message : "自动复筛未完成，请重试。");
+    } finally {
+      setReviewingAppId((current) => current === applicationId ? "" : current);
+    }
+  });
+  useEffect(() => {
+    if (!snapshot || snapshot.user.role !== "hr" || !selected) return;
+    const application = snapshot.state.applications.find((item) => item.id === selected);
+    const job = snapshot.state.jobs.find((item) => item.id === application?.jobId);
+    const key = `${snapshot.user.id}:${selected}`;
+    if (
+      !application || !job ||
+      application.status !== "active" ||
+      !["new", "screening", "interview"].includes(application.stage) ||
+      application.snapshot.restricted ||
+      application.source === "个人信息已清理" ||
+      application.snapshot.resume === "个人信息已清理" ||
+      (application.selection?.resumeReview?.mode === "llm" && reportIsCurrent(application.selection.resumeReview, job)) ||
+      ["failed", "blocked", "running"].includes(application.selection?.aiReview?.status || "") ||
+      attemptedReviews.current.has(key)
+    ) return;
+    attemptedReviews.current.add(key);
+    void ensureResumeReview(selected);
+  }, [snapshot, selected]);
   if (loading)
     return (
       <div className="startup">
@@ -384,6 +421,9 @@ export default function Workspace() {
             <InfoIcon />
             这些是公开的演示账号，使用统一测试密码。请勿录入真实个人资料。
           </div>
+          <a href="/careers" className="login-careers-link">
+            我是候选人，查看职位并投递 <ArrowRight size={16} />
+          </a>
         </section>
       </main>
     );
@@ -574,6 +614,8 @@ export default function Workspace() {
         {items.map((i) => {
           const app = state.applications.find((a) => a.id === i.applicationId)!;
           const own = i.interviewerIds.includes(user.id);
+          const meetingUrl =
+            safeMeetingUrl(i.meetingUrl || "") || safeMeetingUrl(i.location);
           const dateParts = new Intl.DateTimeFormat("zh-CN", {
             timeZone: "Asia/Shanghai",
             month: "numeric",
@@ -634,6 +676,69 @@ export default function Workspace() {
                   面试官：
                   {i.interviewerIds.map((id) => person(state, id)).join("、")}
                 </small>
+                {(meetingUrl || i.meetingId || i.meetingPassword ||
+                  /腾讯会议|飞书|钉钉|Zoom|Teams|线上|视频/i.test(i.location)) && (
+                  <div className="meeting-info">
+                    {meetingUrl ? (
+                      <a
+                        className="button small"
+                        href={meetingUrl}
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        title={meetingUrl}
+                      >
+                        <Video size={13} />
+                        加入会议
+                        <ArrowUpRight size={12} />
+                      </a>
+                    ) : (
+                      <span>会议链接待补充{isHR && i.status === "scheduled" ? "，可通过改期补录" : "，请联系 HR"}</span>
+                    )}
+                    {i.meetingId && <span>会议号：{i.meetingId}</span>}
+                    {i.meetingPassword && <span>密码：{i.meetingPassword}</span>}
+                    {(meetingUrl || i.meetingId || i.meetingPassword) && (
+                      <button
+                        className="text-button"
+                        onClick={async () => {
+                          try {
+                            await navigator.clipboard.writeText([
+                              `${i.round} · ${app.snapshot.name}`,
+                              `${dateTime(i.start)}–${dateTime(i.end)}（北京时间）`,
+                              i.location,
+                              meetingUrl && `会议链接：${meetingUrl}`,
+                              i.meetingId && `会议号：${i.meetingId}`,
+                              i.meetingPassword && `入会密码：${i.meetingPassword}`,
+                            ].filter(Boolean).join("\n"));
+                            setToast("会议信息已复制");
+                          } catch {
+                            setToast("复制失败，请手动复制会议信息");
+                          }
+                        }}
+                      >
+                        <Copy size={12} />
+                        复制会议信息
+                      </button>
+                    )}
+                  </div>
+                )}
+                <InterviewInvite
+                  interview={i}
+                  application={app}
+                  recipientEmail={
+                    state.candidates.find(
+                      (candidate) => candidate.id === app.candidateId,
+                    )?.email || ""
+                  }
+                  revision={state.revision}
+                  canSend={
+                    isHR &&
+                    i.status === "scheduled" &&
+                    app.status === "active" &&
+                    app.stage === "interview"
+                  }
+                  onSnapshot={setSnapshot}
+                  onRefresh={refresh}
+                />
               </div>
               <div className="agenda-actions">
                 <button
@@ -682,16 +787,6 @@ export default function Workspace() {
                     >
                       取消
                     </button>
-                    {!i.notified && (
-                      <button
-                        className="text-button"
-                        onClick={() =>
-                          run("notifyInterview", { interviewId: i.id })
-                        }
-                      >
-                        标记已人工通知
-                      </button>
-                    )}
                   </>
                 )}
                 {own && i.status === "completed" && (
@@ -775,7 +870,7 @@ export default function Workspace() {
             <strong>为更好的招聘协作</strong>
             <p>社招与校招，同一条人才链路。</p>
             <button onClick={() => setPage("settings")}>
-              查看演示说明 <ArrowUpRight size={14} />
+              查看核心模块 <ArrowUpRight size={14} />
             </button>
           </div>
           <button
@@ -785,7 +880,7 @@ export default function Workspace() {
             onClick={() => setPage("settings")}
           >
             <Settings size={17} />
-            演示与设置
+            项目说明与设置
           </button>
           <div className="sidebar-user">
             <Avatar name={user.name} />
@@ -804,6 +899,9 @@ export default function Workspace() {
             <strong>{titles[page]}</strong>
           </div>
           <div className="top-actions">
+            <a href="/careers" className="workspace-careers-link" target="_blank" rel="noreferrer">
+              候选人投递入口 <ExternalLink size={13} />
+            </a>
             <span className="synthetic-label">
               <span />
               合成数据演示
@@ -860,7 +958,7 @@ export default function Workspace() {
                     interviews: "协调每一场面试，及时沉淀每一份评价。",
                     offers: "从录用意向到实际到岗，分别确认每一个结果。",
                     analytics: "用一致的数据口径，找到招聘流程中的改进机会。",
-                    settings: "了解演示能力与角色边界，安全地体验完整流程。",
+                    settings: "了解六个核心模块、业务门槛与当前交付范围。",
                   }[page]
                 }
               </p>
@@ -1086,7 +1184,7 @@ export default function Workspace() {
                       </Section>
                       <Section
                         title="近期面试"
-                        subtitle="系统内安排 · 通知由 HR 人工确认"
+                        subtitle="安排面试后发送邮件邀请，跟进候选人答复"
                         action={
                           <button
                             className="text-button"
@@ -1545,7 +1643,7 @@ export default function Workspace() {
                   </div>
                   <Section
                     title="面试安排与反馈"
-                    subtitle="北京时间 · 从候选人详情安排面试，通知由 HR 人工确认"
+                    subtitle="北京时间 · 安排面试、发送邮件邀请并跟进候选人答复"
                     action={
                       <Badge tone="blue">{interviews.length} 场记录</Badge>
                     }
@@ -1872,7 +1970,50 @@ export default function Workspace() {
               {page === "settings" && (
                 <>
                   <Section
-                    title="这是一个可操作的招聘 Demo"
+                    title="六个核心模块，串起完整招聘流程"
+                    subtitle="每个模块都有可操作记录；关键决定由对应角色确认，过程保留时间与依据。"
+                  >
+                    <div className="capability-list core-modules">
+                      {([
+                        ["jobs", "01 · 职位需求", "将用人需求变成明确的招聘标准", "创建社招 / 校招职位，经理确认后发布，支持暂停与关闭。有进行中投递时，须先处理完流程再关闭职位。"],
+                        ["applications", "02 · 候选人与投递", "保留同一个人在不同岗位的独立经历", "候选人自助投递，HR 上传简历、核对字段或 CSV 预检导入，支持专属资料核对链接。同人多岗分别保存资料快照、进度和结果。"],
+                        ["selection", "03 · 甄选与测评", "让判断有证据，让未知资料有后续处理", "保存投递后自动初筛，初筛完成后请求模型生成证据复筛，缺项与未知信息交 AI 及 HR 核实；配置缺失或调用失败明确提示。HR 人工复核，笔试与工作偏好问卷按岗位选用。"],
+                        ["interviews", "04 · 面试协作", "协调时间，保留独立评价", "排期冲突检查，保存会议入会资料，预览并发送邀请、收取确认或改期申请；面试官独立提交后查看同伴评价，修改须退回留因。"],
+                        ["offers", "05 · 录用与入职", "把录用意向落实为实际到岗", "收齐面试评价后由经理决定，HR 登记 Offer、答复和计划到岗日。校招单独登记协议，实际入职须再次确认。"],
+                        ["analytics", "06 · 招聘分析", "让统计可以回到业务记录核对", "分开统计人数与投递，按招聘类型、批次和岗位查看漏斗、渠道、Offer 接受率与反馈及时率；空分母显示未知。"],
+                      ] as const).map(([target, title, purpose, delivered]) => (
+                        <div key={target}>
+                          <span>
+                            <strong>{title}</strong>
+                            <p className="core-purpose">{purpose}</p>
+                            <p>{delivered}</p>
+                          </span>
+                          {(user.role === "hr" || user.role === "manager" || (user.role === "interviewer" && target === "interviews")) && (
+                            <button
+                              className="button small"
+                              aria-label={`打开${title.slice(5)}`}
+                              onClick={() => {
+                                setQuery("");
+                                setType("all");
+                                setBatch("");
+                                setJobId("");
+                                setResult("all");
+                                setJobStatusFilter("all");
+                                setPage(target);
+                              }}
+                            >
+                              查看模块 <ArrowRight size={14} />
+                            </button>
+                          )}
+                        </div>
+                      ))}
+                    </div>
+                    <div className="chart-note">
+                      协作路径：需求确认 → 投递与资料核对 → 人工甄选 → 面试评价 → 经理决定 → Offer 答复 → 实际入职。测评按岗位选用。
+                    </div>
+                  </Section>
+                  <Section
+                    title="贯穿流程的项目基础"
                     subtitle="使用合成资料体验流程与协作，数据通过服务端保存。"
                   >
                     <div className="definition-grid">
@@ -1880,25 +2021,21 @@ export default function Workspace() {
                         <Shield size={22} />
                         <h3>角色权限</h3>
                         <p>
-                          HR
-                          负责流程，经理确认需求与录用，面试官只看分配的任务。管理员默认无招聘资料权限。
+                          HR 负责流程，经理只操作本人岗位，面试官只看分配的任务，联系方式脱敏。服务端校验每次操作；管理员默认无招聘资料权限。
                         </p>
                       </div>
                       <div>
                         <FileCheck size={22} />
-                        <h3>结果分别确认</h3>
+                        <h3>审计与证据失效</h3>
                         <p>
-                          接受
-                          Offer、登记校招协议和实际入职互相独立，不自动将录用意向计为实际入职。
+                          关键操作记录操作者、时间与依据。更正资料后，旧筛选结论和经理决定需要重新确认；人工评价修改须留退回原因。
                         </p>
                       </div>
                       <div>
                         <Building2 size={22} />
-                        <h3>小规模演示存储</h3>
+                        <h3>保存与并发保护</h3>
                         <p>
-                          D1 保存业务对象集合，revision
-                          防止并发覆盖。尚未实现生产规范化表、企业 SSO
-                          与完整资料治理。
+                          刷新与重登可继续处理，版本冲突会拒绝覆盖并提示刷新。支持合成资料清理，保留统计记录。生产备份恢复与完整资料治理仍待完成。
                         </p>
                       </div>
                     </div>
@@ -1913,7 +2050,7 @@ export default function Workspace() {
                           "规则核对",
                           "已实现",
                           "blue",
-                          "配置最低学历、必需技能与届别；逐项给出符合、未符合或待核实，不自动淘汰。",
+                          "配置最低学历、必需技能与届别；逐项整理命中线索、缺项或待核实信息，交 AI 及 HR 继续核对，不自动淘汰。",
                         ],
                         [
                           "HR 复核",
@@ -1929,9 +2066,9 @@ export default function Workspace() {
                         ],
                         [
                           "AI 简历复筛",
-                          "规则演示",
+                          "真实 API 接入",
                           "violet",
-                          "可生成并保存匹配报告、原文证据和缺口。当前用固定规则模拟，未调用真实模型。",
+                          "初筛完成后请求模型整理简历证据、缺口和追问，缺项与未知信息交 AI 及 HR 核实，核验引文后保存；需配置模型服务并由指定账号操作。实际状态以投递报告为准，历史演示报告单独标识。",
                         ],
                         [
                           "工作偏好问卷与笔试",
@@ -1967,11 +2104,12 @@ export default function Workspace() {
                   <Section title="外部服务与演示账号">
                     <div className="settings-details">
                       <p>
-                        面试仅在系统内安排，通知由 HR
-                        人工确认。邮件、短信、外部日历、招聘渠道、电子签约、背调与
-                        HRIS 均未接入。所有账号使用公开测试密码{" "}
+                        资料核对和面试邀请支持 Gmail 服务端发信，面试邀请可跟进候选人确认或改期申请；发送前需由指定账号连接招聘邮箱，预览草稿不计为已发送，发送成功不代表已送达。短信、外部日历、招聘渠道、电子签约、背调与 HRIS 尚未接入。启用真实邮件或模型服务后，招聘工作台仅允许指定的站点账号操作。演示账号使用公开测试密码{" "}
                         <code>Demo2026!</code>，请勿录入真实资料。
                       </p>
+                      <a className="document-link" href="/mail-connect">
+                        招聘邮箱连接与发送设置 <ExternalLink size={15} />
+                      </a>
                       <div className="account-list">
                         {state.users.map((u) => (
                           <div key={u.id}>
@@ -2173,7 +2311,7 @@ export default function Workspace() {
                               }
                             >
                               {item.status === "matched"
-                                ? "符合"
+                                ? activeApp.selection?.ruleReview?.kind === "rule" ? "命中线索" : "符合"
                                 : item.status === "missing"
                                   ? "未符合"
                                   : "待核实"}
@@ -2190,24 +2328,23 @@ export default function Workspace() {
                   <div className="detail-section">
                     <h3>
                       02 <span>AI 简历复筛</span>
-                      <Badge tone="violet">规则模拟</Badge>
                     </h3>
-                    <p className="detail-note">
-                      {activeApp.selection?.resumeReview?.summary ||
-                        "在甄选中心生成岗位匹配报告，逐项查看简历证据和待核实问题。"}
-                    </p>
-                    <p className="detail-note">
-                      未调用大模型，模拟报告不代替 HR 的筛选结论。
-                    </p>
-                    {(isHR || user.role === "manager") && (
-                      <button
-                        className="button small primary"
-                        onClick={() => openSelection(activeApp.id)}
-                      >
-                        打开甄选与测评
-                        <ArrowRight size={14} />
-                      </button>
-                    )}
+                    <ResumeReviewContent
+                      application={activeApp}
+                      pending={reviewingAppId === activeApp.id}
+                      disabled={busy || !!reviewingAppId}
+                      canReview={isHR && activeApp.status === "active" && ["new", "screening", "interview"].includes(activeApp.stage) && activeApp.source !== "个人信息已清理" && !activeApp.snapshot.restricted}
+                      ruleCurrent={reportIsCurrent(activeApp.selection?.ruleReview, activeJob)}
+                      onReview={() => {
+                        setReviewingAppId(activeApp.id);
+                        void run("review_resume", { applicationId: activeApp.id }).finally(() => setReviewingAppId(""));
+                      }}
+                      onScreen={() => {
+                        setReviewingAppId(activeApp.id);
+                        void run("run_screening", { applicationId: activeApp.id }).finally(() => setReviewingAppId(""));
+                      }}
+                      onVerify={() => openSelection(activeApp.id)}
+                    />
                   </div>
                   <div className="detail-section">
                     <h3>
@@ -2462,7 +2599,7 @@ export default function Workspace() {
                       </div>
                     ))}
                   <div className="info-strip">
-                    笔试、工作偏好问卷和文本面试可在甄选与测评中心体验。AI
+                    笔试、工作偏好问卷和文本面试可在甄选与测评中心体验。文本面试
                     报告当前使用固定规则模拟，需人工复核。
                   </div>
                   {activeApp.decisionNote && (

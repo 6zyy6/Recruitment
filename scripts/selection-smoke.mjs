@@ -5,12 +5,22 @@ const baseUrl = (process.env.BASE_URL || "http://127.0.0.1:5173").replace(
   /\/$/,
   "",
 );
+const testSiteUserId = process.env.TEST_SITE_USER_ID;
+const testSiteUserEmail = process.env.TEST_SITE_USER_EMAIL;
+const siteHeaders = {};
+if (testSiteUserId !== undefined || testSiteUserEmail !== undefined) {
+  assert.ok(testSiteUserId?.trim() && testSiteUserEmail?.trim(), "TEST_SITE_USER_ID and TEST_SITE_USER_EMAIL must both be configured");
+  assert.ok(["127.0.0.1", "localhost", "[::1]"].includes(new URL(baseUrl).hostname), "Test Sites identity headers are only allowed against a local server");
+  siteHeaders["oai-authenticated-user-id"] = testSiteUserId.trim();
+  siteHeaders["oai-authenticated-user-email"] = testSiteUserEmail.trim();
+}
 const password = process.env.DEMO_PASSWORD || "Demo2026!";
 const runId = Date.now().toString(36);
 const selectionActions = [
   "configure_screening",
   "run_screening",
   "review_resume",
+  "ensure_resume_review",
   "confirm_screening",
   "verify_screening_info",
   "assign_assessment",
@@ -18,6 +28,10 @@ const selectionActions = [
   "generate_interview_assist",
 ];
 let passed = 0;
+let skipped = 0;
+let realReady = false;
+let modelFailure = "尚未取得真实模型报告";
+const SKIP = Symbol("skip");
 
 class Session {
   constructor(userId) {
@@ -31,9 +45,10 @@ class Session {
       headers: {
         ...(body === undefined ? {} : { "content-type": "application/json" }),
         ...(this.cookie ? { cookie: this.cookie } : {}),
+        ...siteHeaders,
       },
       ...(body === undefined ? {} : { body: JSON.stringify(body) }),
-      signal: AbortSignal.timeout(20_000),
+      signal: AbortSignal.timeout(65_000),
     });
     const cookies =
       response.headers.getSetCookie?.() ||
@@ -127,9 +142,14 @@ const aiAnswers = {
 };
 
 async function check(name, task) {
-  await task();
+  if ((await task()) === SKIP) return;
   passed += 1;
   process.stdout.write(`PASS ${String(passed).padStart(2, "0")} ${name}\n`);
+}
+function skip(name) {
+  skipped += 1;
+  process.stdout.write(`SKIP ${name}: ${modelFailure}\n`);
+  return SKIP;
 }
 
 function appOf(state, id = applicationId) {
@@ -175,6 +195,18 @@ function numericReport(report, expectedKind, expectedScore) {
   if (expectedScore !== undefined) assert.equal(report.score, expectedScore);
   assert.match(report.disclaimer, /未调用真实 AI/);
   assert.ok(report.evidence.every((item) => item.quote.trim()));
+}
+function realReport(report) {
+  assert.ok(report);
+  assert.equal(report.kind, "resume");
+  assert.equal(report.mode, "llm");
+  assert.equal(report.score, null);
+  assert.equal(report.maxScore, null);
+  assert.ok(report.model?.trim());
+  assert.ok(report.questions?.length);
+  assert.ok(report.evidence.length);
+  assert.ok(report.evidence.every((item) => item.quote.trim() &&
+    (resume.includes(item.quote) || (item.status !== "matched" && item.quote === "简历未提供相关依据"))));
 }
 
 async function createOpenJob(suffix, type) {
@@ -251,6 +283,8 @@ async function main() {
     assert.ok(app);
     applicationId = app.id;
     candidateId = app.candidateId;
+    assert.ok(app.selection.ruleReview, "Intake must automatically create initial screening");
+    assert.equal(app.selection.resumeReview, undefined);
     await hr.action("createApplication", {
       candidateId,
       jobId: otherJob.id,
@@ -311,7 +345,7 @@ async function main() {
         "review_resume",
         { applicationId },
         422,
-        "SELECTION_RULE_REQUIRED",
+        "SELECTION_REPORT_STALE",
       );
       await hr.action(
         "confirm_screening",
@@ -320,6 +354,7 @@ async function main() {
         "SELECTION_REVIEW_REQUIRED",
       );
       await hr.action("run_screening", { applicationId });
+      await hr.action("review_resume", { applicationId }, 422, "INITIAL_SCREENING_REQUIRED");
       const state = await hr.snapshot();
       const report = appOf(state).selection.ruleReview;
       assert.equal(report.kind, "rule");
@@ -338,38 +373,6 @@ async function main() {
       staysNew(state);
     },
   );
-
-  await check("规则初筛 → 简历复筛 → HR 通过保存报告和人工依据", async () => {
-    await hr.action("review_resume", { applicationId });
-    await hr.action("confirm_screening", {
-      applicationId,
-      conclusion: "pass",
-      note: privateNote,
-    });
-    const state = await hr.snapshot();
-    const selection = appOf(state).selection;
-    numericReport(selection.resumeReview, "resume");
-    assert.ok(
-      selection.resumeReview.evidence.some((item) =>
-        item.quote.includes(resume.slice(0, 40)),
-      ),
-    );
-    assert.deepEqual(
-      selection.resumeReview.policy,
-      state.jobs.find((item) => item.id === job.id).screeningPolicy,
-    );
-    assert.equal(selection.hrReview.conclusion, "pass");
-    assert.equal(selection.hrReview.actorId, "hr");
-    assert.equal(selection.hrReview.note, privateNote);
-    assert.ok(
-      ["run_screening", "review_resume", "confirm_screening"].every((type) =>
-        state.events.some(
-          (item) => item.applicationId === applicationId && item.type === type,
-        ),
-      ),
-    );
-    staysNew(state);
-  });
 
   await check("人工核实只改本投递，失效旧报告并保留测评", async () => {
     written = await assign("written");
@@ -400,12 +403,15 @@ async function main() {
     await hr.action("verify_screening_info", fields);
     const state = await hr.snapshot();
     const app = appOf(state);
+    realReady = app.selection.resumeReview?.mode === "llm";
     assert.equal(app.snapshot.education, "master");
     assert.equal(app.snapshot.graduationYear, 2027);
     assert.deepEqual(app.snapshot.skills, ["SQL", "用户研究"]);
-    assert.equal(app.selection.ruleReview, undefined);
-    assert.equal(app.selection.resumeReview, undefined);
-    assert.equal(app.selection.hrReview, undefined);
+    assert.ok(app.selection.ruleReview);
+    if (!realReady) {
+      assert.equal(app.selection.resumeReview, undefined);
+      assert.equal(app.selection.hrReview, undefined);
+    }
     assert.deepEqual(assessmentOf(state, written.id), written);
     assert.deepEqual(
       state.candidates.find((item) => item.id === candidateId),
@@ -423,9 +429,50 @@ async function main() {
     staysNew(state);
   });
 
+  await check("通过初筛自动请求真实模型，失败时无伪造报告且 HR 通过受阻", async () => {
+    const state = await hr.snapshot(), selection = appOf(state).selection;
+    realReady = selection.resumeReview?.mode === "llm";
+    if (realReady) realReport(selection.resumeReview);
+    else {
+      assert.equal(selection.resumeReview, undefined);
+      assert.equal(selection.aiReview.status, "failed");
+      assert.ok(selection.aiReview.message);
+      modelFailure = selection.aiReview.message;
+      await hr.action("confirm_screening", {
+        applicationId, conclusion: "pass", note: privateNote,
+      }, 422, "SELECTION_REVIEW_REQUIRED");
+    }
+    staysNew(state);
+  });
+
+  await check("真实简历复筛成功后 HR 通过保存报告和人工依据", async () => {
+    if (!realReady) return skip("真实报告成功与 HR 通过");
+    await hr.action("confirm_screening", {
+      applicationId,
+      conclusion: "pass",
+      note: privateNote,
+    });
+    const state = await hr.snapshot();
+    const selection = appOf(state).selection;
+    realReport(selection.resumeReview);
+    assert.deepEqual(
+      selection.resumeReview.policy,
+      state.jobs.find((item) => item.id === job.id).screeningPolicy,
+    );
+    assert.equal(selection.hrReview.conclusion, "pass");
+    assert.equal(selection.hrReview.actorId, "hr");
+    assert.equal(selection.hrReview.note, privateNote);
+    assert.ok(
+      ["run_screening", "verify_screening_info", "confirm_screening"].every((type) =>
+        state.events.some(
+          (item) => item.applicationId === applicationId && item.type === type,
+        ),
+      ),
+    );
+    staysNew(state);
+  });
+
   await check("规则变更阻止旧报告通过，旧 revision 返回 409", async () => {
-    await hr.action("run_screening", { applicationId });
-    await hr.action("review_resume", { applicationId });
     const before = await hr.snapshot();
     const oldReport = appOf(before).selection.ruleReview;
     await hr.action("configure_screening", {
@@ -451,12 +498,22 @@ async function main() {
       "confirm_screening",
       { applicationId, conclusion: "pass", note: privateNote },
       422,
-      "SELECTION_REPORT_STALE",
+      realReady ? "SELECTION_REPORT_STALE" : "SELECTION_REVIEW_REQUIRED",
     );
     let state = await hr.snapshot();
     assert.deepEqual(appOf(state).selection.ruleReview, oldReport);
-    await hr.action("run_screening", { applicationId });
-    await hr.action("review_resume", { applicationId });
+    await hr.action("verify_screening_info", {
+      applicationId, education: "master", graduationYear: 2027,
+      skills: ["SQL", "用户研究", "数据分析"], note: verificationNote,
+    });
+    state = await hr.snapshot();
+    realReady = appOf(state).selection.resumeReview?.mode === "llm";
+    if (!realReady) {
+      assert.equal(appOf(state).selection.resumeReview, undefined);
+      assert.equal(appOf(state).selection.aiReview.status, "failed");
+      staysNew(state);
+      return;
+    }
     await hr.action("confirm_screening", {
       applicationId,
       conclusion: "pass",
@@ -651,6 +708,7 @@ async function main() {
         ],
         ["run_screening", { applicationId }],
         ["review_resume", { applicationId }],
+        ["ensure_resume_review", { applicationId }],
         [
           "verify_screening_info",
           {
@@ -679,8 +737,11 @@ async function main() {
         403,
         "FORBIDDEN",
       );
-      assert.deepEqual(appOf(await hr.snapshot()), appOf(before));
-      assert.ok(appOf(await manager.snapshot()).selection.resumeReview);
+      await check("经理甄选写权限隔离独立于模型配置", async () => {
+        assert.deepEqual(appOf(await hr.snapshot()), appOf(before));
+      });
+      assert.ok(appOf(await manager.snapshot()).selection.ruleReview);
+      if (!realReady) return skip("面试安排与面试官报告可见性（经理写权限隔离已验证）");
 
       // Only these explicit HR operations move the fixture into a schedulable stage.
       await hr.action("advance", {
@@ -737,8 +798,129 @@ async function main() {
     },
   );
 
+  await check(
+    "新版甄选阻止绕过当前 HR 通过，报告和资料变更后须重新复核与决策",
+    async () => {
+      if (!realReady) return skip("真实复筛完成后的经理决定、面试和 Offer 门禁");
+      const fields = { applicationId: otherApplicationId };
+      const mainBefore = appOf(await hr.snapshot());
+      const advance = {
+        ...fields,
+        note: "合成验收：完成当前人工复核后进入面试。",
+      };
+      const decision = {
+        ...fields,
+        decision: "hire",
+        note: "合成验收：经理依据当前 HR 复核和面试评价确认录用。",
+      };
+      const offer = {
+        ...fields,
+        deadline: new Date(Date.now() + 7 * 86_400_000).toISOString(),
+        reference: `V2-GATE-${runId}`,
+      };
+      const approveSelection = async () => {
+        const current = appOf(await hr.snapshot(), otherApplicationId);
+        if (current.selection?.resumeReview?.mode !== "llm")
+          await hr.action("run_screening", fields);
+        await hr.action("confirm_screening", {
+          ...fields,
+          conclusion: "pass",
+          note: "合成验收：逐项核实当前报告及投递资料后人工确认通过。",
+        });
+      };
+
+      await hr.action("verify_screening_info", {
+        ...fields, education: "bachelor", graduationYear: 2027,
+        skills: ["SQL", "用户研究"], note: verificationNote,
+      });
+      await hr.action("advance", advance);
+      await hr.action("advance", advance, 422, "SCREENING_APPROVAL_REQUIRED");
+      await hr.action("confirm_screening", {
+        ...fields,
+        conclusion: "hold",
+        note: "合成验收：资料仍待核实，不能仅凭推进备注跳过本结论。",
+      });
+      await hr.action("advance", advance, 422, "SCREENING_APPROVAL_REQUIRED");
+      await approveSelection();
+      await hr.action("review_resume", fields);
+      await hr.action("advance", advance, 422, "SCREENING_APPROVAL_REQUIRED");
+      assert.equal(appOf(await hr.snapshot(), otherApplicationId).stage, "screening");
+      await approveSelection();
+      await hr.action("advance", advance);
+
+      const beforeInterview = await hr.snapshot();
+      const start = new Date(Date.now() + 16 * 86_400_000);
+      start.setUTCHours(4, 0, 0, 0);
+      while (
+        beforeInterview.interviews.some(
+          (item) =>
+            item.status === "scheduled" &&
+            Date.parse(item.start) < start.getTime() + 3_600_000 &&
+            Date.parse(item.end) > start.getTime(),
+        )
+      )
+        start.setTime(start.getTime() + 2 * 3_600_000);
+      await hr.action("scheduleInterview", {
+        ...fields,
+        round: "V2人工录用门槛验收",
+        start: start.toISOString(),
+        end: new Date(start.getTime() + 3_600_000).toISOString(),
+        interviewerIds: ["interviewer"],
+        location: "合成验收面试房间",
+      });
+      const interview = (await hr.snapshot()).interviews.find(
+        (item) => item.applicationId === otherApplicationId,
+      );
+      assert.ok(interview);
+      await hr.action("interviewStatus", {
+        interviewId: interview.id,
+        status: "completed",
+      });
+      await interviewer.action("submitScorecard", {
+        interviewId: interview.id,
+        ratings: Object.fromEntries(otherJob.dimensions.map((dimension) => [dimension, 4])),
+        evidence: "合成验收：面试中候选人说明个人行动、项目结果及可核实材料。",
+        recommendation: "建议录用",
+      });
+      await manager.action("decision", decision);
+
+      for (const [action, mutation] of [
+        ["review_resume", fields],
+        [
+          "verify_screening_info",
+          {
+            ...fields,
+            education: "bachelor",
+            graduationYear: 2027,
+            skills: ["SQL", "用户研究"],
+            note: "合成验收：补充学历证明后更正本投递资料，旧结论必须失效。",
+          },
+        ],
+      ]) {
+        await hr.action(action, mutation);
+        const changed = appOf(await hr.snapshot(), otherApplicationId);
+        assert.equal(changed.stage, "interview");
+        assert.equal(changed.selection.hrReview, undefined);
+        assert.equal(changed.decision, "pending");
+        assert.equal(changed.decisionNote, "");
+        await manager.action("decision", decision, 422, "SCREENING_APPROVAL_REQUIRED");
+        await hr.action("sendOffer", offer, 422, "DECISION_REQUIRED");
+        await approveSelection();
+        await manager.action("decision", decision);
+      }
+      await hr.action("sendOffer", offer);
+      const state = await hr.snapshot();
+      const completed = appOf(state, otherApplicationId);
+      assert.equal(completed.stage, "offer");
+      assert.equal(completed.offer.status, "sent");
+      assert.equal(completed.decision, "hire");
+      assert.equal(completed.selection.hrReview.conclusion, "pass");
+      assert.deepEqual(appOf(state), mainBefore);
+    },
+  );
+
   process.stdout.write(
-    `\n${passed} V2 selection API scenarios passed. Synthetic run: ${runId}.\nNo seed reset was performed; synthetic fixtures remain for review. Session cookies were not printed.\n`,
+    `\n${passed} V2 selection API scenarios passed; ${skipped} explicitly skipped. Synthetic run: ${runId}.\nNo seed reset was performed; synthetic fixtures remain for review. Session cookies were not printed.\n`,
   );
 }
 

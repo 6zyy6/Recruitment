@@ -1,0 +1,284 @@
+/* Hallmark · component: Gmail connection · genre: modern-minimal · theme: Cobalt */
+.mail-connect-page {
+  max-width: 1000px;
+  padding: 32px 30px 24px;
+  margin: auto;
+  color: var(--color-ink);
+}
+.mail-connect-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 20px;
+  margin-bottom: 48px;
+}
+.mail-connect-brand {
+  display: flex;
+  align-items: center;
+  gap: 11px;
+  color: var(--color-ink);
+  text-decoration: none;
+}
+.mail-connect-brand > span {
+  display: grid;
+  place-items: center;
+  width: 37px;
+  height: 37px;
+  background: var(--primary);
+  color: var(--primary-foreground);
+  border-radius: 9px;
+  font-size: 23px;
+  font-weight: 650;
+}
+.mail-connect-brand strong {
+  font-size: 17px;
+}
+.mail-connect-brand small {
+  color: var(--color-sub);
+  font-size: 12px;
+  font-weight: 400;
+  margin-left: 6px;
+}
+.mail-connect-card {
+  max-width: 620px;
+  margin: auto;
+  padding: 32px 35px;
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  background: var(--card);
+}
+.mail-connect-icon {
+  display: grid;
+  place-items: center;
+  width: 56px;
+  height: 56px;
+  background: var(--color-blue-soft);
+  color: var(--primary);
+  border-radius: 13px;
+  margin-bottom: 20px;
+}
+.mail-connect-card h1 {
+  font-size: 25px;
+  font-weight: 650;
+  letter-spacing: -0.6px;
+  overflow-wrap: anywhere;
+  min-width: 0;
+}
+.mail-connect-lead {
+  font-size: 12px;
+  color: var(--color-sub);
+  line-height: 1.9;
+  margin-top: 10px;
+}
+.mail-connect-status {
+  margin-top: 23px;
+  padding: 17px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: var(--background);
+}
+.mail-connect-status > div {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  color: var(--color-sub);
+}
+.mail-connect-status > div > strong {
+  font-size: 13px;
+  font-weight: 550;
+  color: var(--color-ink);
+}
+.mail-connect-status > div > .badge {
+  margin-left: auto;
+}
+.mail-connect-status p {
+  font-size: 11px;
+  color: var(--color-sub);
+  line-height: 1.8;
+  margin-top: 8px;
+  overflow-wrap: anywhere;
+}
+.mail-connect-status.connected {
+  border-color: var(--color-green);
+}
+.mail-connect-status.connected > div > svg {
+  color: var(--color-green);
+}
+.mail-connect-sender strong {
+  color: var(--color-ink);
+  font-weight: 500;
+}
+.mail-connect-loading {
+  padding: 28px 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 9px;
+  color: var(--color-sub);
+  font-size: 12px;
+}
+.mail-connect-note,
+.mail-connect-error {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+  border-radius: 7px;
+  padding: 12px 13px;
+  margin-top: 14px;
+  font-size: 11px;
+  line-height: 1.9;
+  color: var(--color-sub);
+  background: var(--background);
+}
+.mail-connect-note > svg,
+.mail-connect-error > svg {
+  flex: none;
+  margin-top: 3px;
+}
+.mail-connect-error {
+  background: var(--color-red-soft);
+  color: var(--color-red);
+}
+.mail-connect-actions {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  flex-wrap: wrap;
+  margin-top: 23px;
+}
+.mail-connect-page .button {
+  min-height: 44px;
+  white-space: nowrap;
+}
+.mail-connect-page :is(a, button):focus-visible {
+  outline: 2px solid var(--primary);
+  outline-offset: 3px;
+}
+.mail-connect-auth-link {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  min-height: 44px;
+  font-size: 12px;
+  margin-top: 8px;
+}
+.mail-connect-explainer {
+  margin-top: 27px;
+  padding-top: 22px;
+  border-top: 1px solid var(--border);
+}
+.mail-connect-explainer h2 {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  font-size: 12px;
+  font-weight: 550;
+}
+.mail-connect-explainer ul {
+  margin: 11px 0 0;
+  padding-left: 19px;
+  font-size: 11px;
+  line-height: 2.1;
+  color: var(--color-sub);
+}
+.mail-connect-footer {
+  text-align: center;
+  margin-top: 30px;
+  font-size: 10px;
+  color: var(--color-sub);
+}
+.mail-delivery-note {
+  border: 1px solid var(--border);
+  background: var(--background);
+  color: var(--color-sub);
+  padding: 12px;
+  border-radius: 7px;
+  font-size: 11px;
+  line-height: 1.9;
+}
+.mail-delivery-note.sent {
+  background: var(--color-green-soft);
+  color: var(--color-green);
+  border-color: var(--color-green-soft);
+}
+.mail-delivery-note.failed {
+  background: var(--color-red-soft);
+  color: var(--color-red);
+  border-color: var(--color-red-soft);
+}
+.mail-delivery-note.unknown,
+.mail-delivery-note.sending {
+  background: var(--color-amber-soft);
+  color: var(--color-amber);
+  border-color: var(--color-amber-soft);
+}
+.mail-delivery-note strong {
+  display: block;
+  font-size: 11px;
+  font-weight: 600;
+}
+.mail-delivery-note p {
+  margin-top: 4px;
+  font-size: 10px;
+  line-height: 1.9;
+}
+.mail-delivery-actions {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 9px;
+  margin-top: 12px;
+}
+.mail-delivery-actions .button {
+  min-height: 40px;
+}
+@media (max-width: 600px) {
+  .mail-connect-page {
+    padding: 22px 16px;
+  }
+  .mail-connect-header {
+    margin-bottom: 25px;
+    flex-wrap: wrap;
+  }
+  .mail-connect-brand small {
+    display: none;
+  }
+  .mail-connect-card {
+    padding: 25px 20px;
+  }
+  .mail-connect-card h1 {
+    font-size: 22px;
+  }
+  .mail-connect-actions {
+    flex-direction: column;
+    align-items: stretch;
+  }
+  .mail-connect-actions > .button {
+    justify-content: center;
+  }
+  .mail-connect-status {
+    padding: 14px;
+  }
+}
+
+.mail-delivery-revoke {
+  display: flex;
+  align-items: flex-start;
+  gap: 7px;
+  font-size: 10px;
+  line-height: 1.9;
+  color: var(--color-sub);
+  margin: 12px 0;
+}
+.mail-delivery-revoke input {
+  width: 14px;
+  height: 14px;
+  margin-top: 3px;
+  accent-color: var(--primary);
+  flex: none;
+}
+.mail-delivery-actions > span {
+  color: var(--color-sub);
+  font-size: 10px;
+  line-height: 1.9;
+}
