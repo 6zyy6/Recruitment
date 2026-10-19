@@ -225,9 +225,18 @@ async function main() {
     mainApplication = created.application;
     assert.equal(created.candidate.graduationYear, null);
     assert.equal(mainApplication.selection.ruleReview.kind, 'rule');
-    assert.equal(mainApplication.selection.aiReview.status, 'blocked');
-    assert.equal(mainApplication.selection.resumeReview, undefined);
+    assert.ok(mainApplication.selection.ruleReview.evidence.some(item => item.status === 'unknown'));
+    if (mainApplication.selection.resumeReview?.mode === 'llm') {
+      assert.ok(mainApplication.selection.resumeReview.model?.trim());
+      assert.equal(mainApplication.selection.aiReview, undefined);
+    } else {
+      assert.equal(mainApplication.selection.resumeReview, undefined);
+      assert.equal(mainApplication.selection.aiReview.status, 'failed');
+      assert.ok(mainApplication.selection.aiReview.message?.trim());
+    }
     assert.equal(mainApplication.stage, 'new');
+    assert.equal(mainApplication.decision, 'pending');
+    assert.equal(mainApplication.selection.hrReview, undefined);
   });
 
   await check('同一候选人多岗投递保持独立', async () => {

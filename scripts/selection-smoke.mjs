@@ -284,7 +284,13 @@ async function main() {
     applicationId = app.id;
     candidateId = app.candidateId;
     assert.ok(app.selection.ruleReview, "Intake must automatically create initial screening");
-    assert.equal(app.selection.resumeReview, undefined);
+    if (app.selection.resumeReview?.mode === "llm") realReport(app.selection.resumeReview);
+    else {
+      assert.equal(app.selection.resumeReview, undefined);
+      assert.equal(app.selection.aiReview.status, "failed");
+      assert.ok(app.selection.aiReview.message?.trim());
+    }
+    assert.equal(app.selection.hrReview, undefined);
     await hr.action("createApplication", {
       candidateId,
       jobId: otherJob.id,
@@ -351,10 +357,12 @@ async function main() {
         "confirm_screening",
         { applicationId, conclusion: "pass", note: privateNote },
         422,
-        "SELECTION_REVIEW_REQUIRED",
+        appOf(await hr.snapshot()).selection.resumeReview?.mode === "llm"
+          ? "SELECTION_REPORT_STALE"
+          : "SELECTION_REVIEW_REQUIRED",
       );
       await hr.action("run_screening", { applicationId });
-      await hr.action("review_resume", { applicationId }, 422, "INITIAL_SCREENING_REQUIRED");
+      await hr.action("review_resume", { applicationId });
       const state = await hr.snapshot();
       const report = appOf(state).selection.ruleReview;
       assert.equal(report.kind, "rule");
@@ -364,6 +372,14 @@ async function main() {
       assert.ok(report.evidence.every((item) => item.status === "unknown"));
       assert.ok(report.evidence.some((item) => item.label.includes("学历")));
       assert.ok(report.evidence.some((item) => item.label.includes("SQL")));
+      const selection = appOf(state).selection;
+      if (selection.resumeReview?.mode === "llm") realReport(selection.resumeReview);
+      else {
+        assert.equal(selection.resumeReview, undefined);
+        assert.equal(selection.aiReview.status, "failed");
+        assert.ok(selection.aiReview.message?.trim());
+      }
+      assert.equal(selection.hrReview, undefined);
       assert.ok(
         !state.events.some(
           (item) =>
@@ -511,6 +527,8 @@ async function main() {
     if (!realReady) {
       assert.equal(appOf(state).selection.resumeReview, undefined);
       assert.equal(appOf(state).selection.aiReview.status, "failed");
+      assert.ok(appOf(state).selection.aiReview.message?.trim());
+      modelFailure = appOf(state).selection.aiReview.message;
       staysNew(state);
       return;
     }
