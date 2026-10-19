@@ -148,6 +148,7 @@ export default function Workspace() {
     [jobId, setJobId] = useState(""),
     [batch, setBatch] = useState(""),
     [result, setResult] = useState("all"),
+    [jobStatusFilter, setJobStatusFilter] = useState<"all" | "open">("all"),
     [board, setBoard] = useState(false),
     [selected, setSelected] = useState(""),
     [detailTab, setDetailTab] = useState("profile"),
@@ -250,6 +251,7 @@ export default function Workspace() {
       setType("all");
       setBatch("");
       setResult("all");
+      setJobStatusFilter("all");
       setSelectionAppId("");
       setToast("已切换演示账号");
     } catch (e) {
@@ -389,6 +391,19 @@ export default function Workspace() {
   const isHR = user.role === "hr";
   const visibleJobs = state.jobs.filter(
     (j) => (type === "all" || j.type === type) && (!batch || j.batch === batch),
+  );
+  const jobQuery = query.trim().toLowerCase();
+  const matchingJobs = visibleJobs.filter(
+    (j) =>
+      (!jobId || j.id === jobId) &&
+      (!jobQuery ||
+        [j.title, j.department, ...j.skills]
+          .join(" ")
+          .toLowerCase()
+          .includes(jobQuery)),
+  );
+  const listedJobs = matchingJobs.filter(
+    (j) => jobStatusFilter === "all" || j.status === jobStatusFilter,
   );
   const apps = m.filteredApplications.filter(
     (a) => result === "all" || a.status === result,
@@ -743,6 +758,7 @@ export default function Workspace() {
                   setPage(id);
                   setJobId("");
                   setResult("all");
+                  setJobStatusFilter("all");
                 }}
                 className={page === id ? "active" : ""}
               >
@@ -969,17 +985,29 @@ export default function Workspace() {
                     {[
                       {
                         label: "招聘中职位",
-                        value: m.openJobs,
-                        sub: `${visibleJobs.filter((j) => j.status === "pending").length} 个需求待确认`,
+                        value: matchingJobs.filter((j) => j.status === "open")
+                          .length,
+                        sub: `${matchingJobs.filter((j) => j.status === "pending").length} 个需求待确认`,
+                        unit: "个",
                         icon: Briefcase,
                         tone: "blue",
+                        onClick: () => {
+                          setJobStatusFilter("open");
+                          setPage("jobs");
+                        },
                       },
                       {
                         label: "进行中投递",
                         value: m.active,
                         sub: `${m.people} 位候选人 · ${m.total} 次投递`,
+                        unit: "份",
                         icon: Users,
                         tone: "violet",
+                        onClick: () => {
+                          setResult("active");
+                          setBoard(false);
+                          setPage("applications");
+                        },
                       },
                       {
                         label: "待完成面试",
@@ -987,36 +1015,50 @@ export default function Workspace() {
                           (i) => i.status === "scheduled",
                         ).length,
                         sub: `${pendingCards.length} 场面试待收齐评价`,
+                        unit: "场",
                         icon: Calendar,
                         tone: "amber",
+                        onClick: () => {
+                          setAgendaFilter("scheduled");
+                          setPage("interviews");
+                        },
                       },
                       {
                         label: "已确认入职",
                         value: m.joined,
-                        sub: `${m.filteredApplications.filter((a) => a.stage === "onboarding" && a.status === "active").length} 人待入职跟进`,
+                        sub: `${m.filteredApplications.filter((a) => a.stage === "onboarding" && a.status === "active").length} 份投递待入职跟进`,
+                        unit: "条",
                         icon: CheckCircle2,
                         tone: "teal",
+                        onClick: () => {
+                          setResult("joined");
+                          setBoard(false);
+                          setPage("applications");
+                        },
                       },
                     ].map((x) => (
-                      <div className="stat-card" key={x.label}>
+                      <button
+                        type="button"
+                        className="stat-card"
+                        key={x.label}
+                        onClick={x.onClick}
+                        aria-label={`查看${x.label}明细，${x.value}${x.unit}`}
+                      >
                         <span className={`stat-icon tone-${x.tone}`}>
                           <x.icon size={20} />
                         </span>
                         <span className="stat-label">{x.label}</span>
                         <strong>
                           {x.value}
-                          <small>
-                            {x.label.includes("职位")
-                              ? "个"
-                              : x.label.includes("投递")
-                                ? "份"
-                                : x.label.includes("面试")
-                                  ? "场"
-                                  : "人"}
-                          </small>
+                          <small>{x.unit}</small>
                         </strong>
-                        <p>{x.sub}</p>
-                      </div>
+                        <span className="stat-sub">{x.sub}</span>
+                        <ArrowUpRight
+                          className="stat-drilldown"
+                          size={15}
+                          aria-hidden="true"
+                        />
+                      </button>
                     ))}
                   </div>
                   <div className="overview-grid">
@@ -1140,22 +1182,49 @@ export default function Workspace() {
                 <>
                   <div className="subtoolbar">
                     <p>
-                      共 <strong>{visibleJobs.length}</strong> 个职位 ·{" "}
-                      {visibleJobs.filter((j) => j.status === "open").length}{" "}
+                      共 <strong>{listedJobs.length}</strong> 个职位 ·{" "}
+                      {listedJobs.filter((j) => j.status === "open").length}{" "}
                       个招聘中
                     </p>
                     <Badge>用人确认 ≠ 预算审批</Badge>
                   </div>
+                  <div className="list-toolbar">
+                    <select
+                      aria-label="筛选职位"
+                      value={jobId}
+                      onChange={(e) => setJobId(e.target.value)}
+                    >
+                      <option value="">全部职位</option>
+                      {visibleJobs.map((j) => (
+                        <option key={j.id} value={j.id}>
+                          {j.title}
+                        </option>
+                      ))}
+                    </select>
+                    <div
+                      className="small-tabs"
+                      role="group"
+                      aria-label="职位状态"
+                    >
+                      {(
+                        [
+                          ["all", "全部状态"],
+                          ["open", "招聘中"],
+                        ] as const
+                      ).map(([value, label]) => (
+                        <button
+                          key={value}
+                          className={jobStatusFilter === value ? "active" : ""}
+                          aria-pressed={jobStatusFilter === value}
+                          onClick={() => setJobStatusFilter(value)}
+                        >
+                          {label}
+                        </button>
+                      ))}
+                    </div>
+                  </div>
                   <div className="jobs-grid">
-                    {visibleJobs
-                      .filter(
-                        (j) =>
-                          !query ||
-                          [j.title, j.department, ...j.skills]
-                            .join(" ")
-                            .toLowerCase()
-                            .includes(query.toLowerCase()),
-                      )
+                    {listedJobs
                       .map((j) => {
                         const ja = state.applications.filter(
                           (a) => a.jobId === j.id,
@@ -1215,19 +1284,13 @@ export default function Workspace() {
                               </div>
                               <div>
                                 <strong>
-                                  {
-                                    ja.filter((a) => a.status === "active")
-                                      .length
-                                  }
+                                  {ja.filter((a) => a.status === "active").length}
                                 </strong>
                                 <small>进行中</small>
                               </div>
                               <div>
                                 <strong>
-                                  {
-                                    ja.filter((a) => a.status === "joined")
-                                      .length
-                                  }
+                                  {ja.filter((a) => a.status === "joined").length}
                                   <em> / {j.headcount}</em>
                                 </strong>
                                 <small>已入职 / 需求</small>
@@ -1336,7 +1399,7 @@ export default function Workspace() {
                         );
                       })}
                   </div>
-                  {!visibleJobs.length && <Empty text="该范围没有职位" />}
+                  {!listedJobs.length && <Empty text="当前筛选下没有职位" />}
                 </>
               )}
               {page === "applications" && (
