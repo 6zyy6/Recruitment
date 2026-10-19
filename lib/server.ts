@@ -2,6 +2,7 @@ import { env } from "cloudflare:workers";
 import type { AppState, User } from "./domain.ts";
 import { applyAction, BusinessError, projectState } from "./engine.ts";
 import { createSeed, DEMO_USERS } from "./seed.ts";
+import { publicJobs, submitCareerApplication } from "./careers.ts";
 import {
   CandidateReviewError,
   CANDIDATE_REVIEW_DEMO_NOTICE,
@@ -228,6 +229,28 @@ async function saveState(current: AppState, next: AppState) {
       "数据已被其他操作更新，请刷新后重试",
       409,
     );
+}
+const careersHeaders = {
+  "cache-control": "no-store",
+  "x-content-type-options": "nosniff",
+};
+export async function careersSnapshot() {
+  return Response.json({ jobs: publicJobs(await loadState()) }, { headers: careersHeaders });
+}
+export async function careersAction(request: Request, input: Record<string, unknown>) {
+  checkOrigin(request);
+  // Recompute after a competing write so duplicates and job availability use the winning state.
+  for (let attempt = 0; attempt < 3; attempt++) {
+    const current = await loadState();
+    const result = await submitCareerApplication(current, input);
+    try {
+      if (!result.replayed) await saveState(current, result.state);
+      return Response.json({ receipt: result.receipt }, { headers: careersHeaders });
+    } catch (error) {
+      if (!(error instanceof BusinessError) || error.code !== "REVISION_CONFLICT" || attempt === 2) throw error;
+    }
+  }
+  throw new BusinessError("REVISION_CONFLICT", "提交较多，请稍后重试", 409);
 }
 const reviewHeaders = {
   "cache-control": "no-store",

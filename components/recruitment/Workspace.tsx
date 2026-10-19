@@ -30,6 +30,8 @@ import {
   LogOut,
   ExternalLink,
   ListFilter,
+  Copy,
+  Video,
 } from "lucide-react";
 import type {
   AppState,
@@ -42,6 +44,7 @@ import type {
 } from "@/lib/domain";
 import { STAGES, STAGE_LABELS, ROLE_LABELS } from "@/lib/domain";
 import { getMetrics } from "@/lib/metrics";
+import { safeMeetingUrl } from "@/lib/interview";
 import Modals from "./Modals";
 import SelectionCenter from "./SelectionCenter";
 import CandidateReviewInvite from "./CandidateReviewInvite";
@@ -384,6 +387,9 @@ export default function Workspace() {
             <InfoIcon />
             这些是公开的演示账号，使用统一测试密码。请勿录入真实个人资料。
           </div>
+          <a href="/careers" className="login-careers-link">
+            我是候选人，查看职位并投递 <ArrowRight size={16} />
+          </a>
         </section>
       </main>
     );
@@ -574,6 +580,8 @@ export default function Workspace() {
         {items.map((i) => {
           const app = state.applications.find((a) => a.id === i.applicationId)!;
           const own = i.interviewerIds.includes(user.id);
+          const meetingUrl =
+            safeMeetingUrl(i.meetingUrl || "") || safeMeetingUrl(i.location);
           const dateParts = new Intl.DateTimeFormat("zh-CN", {
             timeZone: "Asia/Shanghai",
             month: "numeric",
@@ -634,6 +642,51 @@ export default function Workspace() {
                   面试官：
                   {i.interviewerIds.map((id) => person(state, id)).join("、")}
                 </small>
+                {(meetingUrl || i.meetingId || i.meetingPassword ||
+                  /腾讯会议|飞书|钉钉|Zoom|Teams|线上|视频/i.test(i.location)) && (
+                  <div className="meeting-info">
+                    {meetingUrl ? (
+                      <a
+                        className="button small"
+                        href={meetingUrl}
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        title={meetingUrl}
+                      >
+                        <Video size={13} />
+                        加入会议
+                        <ArrowUpRight size={12} />
+                      </a>
+                    ) : (
+                      <span>会议链接待补充{isHR && i.status === "scheduled" ? "，可通过改期补录" : "，请联系 HR"}</span>
+                    )}
+                    {i.meetingId && <span>会议号：{i.meetingId}</span>}
+                    {i.meetingPassword && <span>密码：{i.meetingPassword}</span>}
+                    {(meetingUrl || i.meetingId || i.meetingPassword) && (
+                      <button
+                        className="text-button"
+                        onClick={async () => {
+                          try {
+                            await navigator.clipboard.writeText([
+                              `${i.round} · ${app.snapshot.name}`,
+                              `${dateTime(i.start)}–${dateTime(i.end)}（北京时间）`,
+                              i.location,
+                              meetingUrl && `会议链接：${meetingUrl}`,
+                              i.meetingId && `会议号：${i.meetingId}`,
+                              i.meetingPassword && `入会密码：${i.meetingPassword}`,
+                            ].filter(Boolean).join("\n"));
+                            setToast("会议信息已复制");
+                          } catch {
+                            setToast("复制失败，请手动复制会议信息");
+                          }
+                        }}
+                      >
+                        <Copy size={12} />
+                        复制会议信息
+                      </button>
+                    )}
+                  </div>
+                )}
               </div>
               <div className="agenda-actions">
                 <button
@@ -804,6 +857,9 @@ export default function Workspace() {
             <strong>{titles[page]}</strong>
           </div>
           <div className="top-actions">
+            <a href="/careers" className="workspace-careers-link" target="_blank" rel="noreferrer">
+              候选人投递入口 <ExternalLink size={13} />
+            </a>
             <span className="synthetic-label">
               <span />
               合成数据演示

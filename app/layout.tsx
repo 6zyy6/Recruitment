@@ -4,6 +4,7 @@ import "./workspace.css";
 import "./selection.css";
 import "./intake.css";
 import "./candidate-review.css";
+import "./careers.css";
 
 export const metadata: Metadata = {
   title: "拾才 TalentFlow · 招聘协作工作台",

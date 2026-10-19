@@ -189,6 +189,9 @@ export interface Interview {
   end: string;
   interviewerIds: string[];
   location: string;
+  meetingUrl?: string;
+  meetingId?: string;
+  meetingPassword?: string;
   status: "scheduled" | "completed" | "no_show" | "cancelled";
   notified: boolean;
 }
@@ -239,6 +242,12 @@ export interface AppState {
   events: Activity[];
   imports: ImportJob[];
   reviews?: CandidateReview[];
+  // Server-only idempotency records; never included in a client state projection.
+  careerSubmissions?: {
+    requestId: string;
+    inputHash: string;
+    receipt: { reference: string; jobTitle: string; submittedAt: string };
+  }[];
 }
 export interface Snapshot {
   user: User;

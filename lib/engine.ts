@@ -9,6 +9,7 @@ import type {
 } from "./domain.ts";
 import { createSeed } from "./seed.ts";
 import { parseCsv } from "./csv.ts";
+import { safeMeetingUrl } from "./interview.ts";
 import { CandidateReviewError, revokeCandidateReview } from "./candidate-review.ts";
 import {
   handleSelectionAction,
@@ -134,6 +135,7 @@ function restrictCandidate(candidate: Candidate): Candidate {
 export function projectState(source: AppState, user: User): AppState {
   const state = structuredClone(source);
   delete state.reviews;
+  delete state.careerSubmissions;
   if (user.role === "admin")
     return {
       ...state,
@@ -397,7 +399,11 @@ export function applyAction(
       fail("INVALID_STAGE", "请先完成筛选并推进到面试阶段");
     const start = iso(data.start, "面试开始时间"),
       end = iso(data.end, "面试结束时间");
-    if (Date.parse(start) < clock.getTime())
+    const previous = state.interviews.find((interview) => interview.id === exceptId);
+    const unchangedTime = previous &&
+      Date.parse(previous.start) === Date.parse(start) &&
+      Date.parse(previous.end) === Date.parse(end);
+    if (Date.parse(start) < clock.getTime() && !unchangedTime)
       fail("PAST_INTERVIEW", "面试开始时间不能早于当前时间");
     if (end <= start || Date.parse(end) - Date.parse(start) > 8 * 3600000)
       fail(
@@ -435,11 +441,24 @@ export function applyAction(
         "该时段面试官或候选人已有面试，请选择其他时间",
         409,
       );
+    if (data.meetingUrl !== undefined && typeof data.meetingUrl !== "string")
+      fail("INVALID_MEETING_URL", "会议链接格式不正确");
+    const meetingUrlInput = typeof data.meetingUrl === "string" ? data.meetingUrl : "";
+    const meetingUrl = safeMeetingUrl(meetingUrlInput);
+    if (meetingUrlInput && !meetingUrl)
+      fail("INVALID_MEETING_URL", "请填写有效的 HTTPS 会议链接，不得包含账号、密码或空白字符");
+    const meetingId = str(data.meetingId),
+      meetingPassword = str(data.meetingPassword);
+    if (meetingId.length > 80) fail("TOO_LONG", "会议号不能超过 80 个字符");
+    if (meetingPassword.length > 100) fail("TOO_LONG", "入会密码不能超过 100 个字符");
     return {
       start,
       end,
       interviewerIds,
       location: required(data.location, "面试地点 / 会议链接"),
+      meetingUrl,
+      meetingId,
+      meetingPassword,
     };
   };
   const reviewComplete = (app: Application) => {
@@ -724,7 +743,7 @@ export function applyAction(
         "interview_rescheduled",
         "",
         "",
-        "面试已改期，需重新确认通知",
+        "面试安排已更新，需重新确认通知",
       );
       break;
     }
@@ -1187,6 +1206,9 @@ export function applyAction(
       );
       relatedInterviews.forEach((i) => {
         i.location = "个人信息已清理";
+        delete i.meetingUrl;
+        delete i.meetingId;
+        delete i.meetingPassword;
       });
       const interviewIds = new Set(relatedInterviews.map((i) => i.id));
       state.scorecards

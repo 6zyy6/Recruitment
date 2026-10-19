@@ -1010,6 +1010,20 @@ button:not(.primary):hover {
 .agenda-body small > svg {
   flex: none;
 }
+.meeting-info {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 7px 10px;
+  margin-top: 8px;
+  color: var(--muted-foreground);
+  font-size: 11px;
+  overflow-wrap: anywhere;
+}
+.meeting-info .button,
+.meeting-info .text-button {
+  font-size: 11px;
+}
 .agenda-summary {
   display: grid;
   grid-template-columns: repeat(3, minmax(0, 1fr));
@@ -1940,6 +1954,7 @@ button:not(.primary):hover {
   flex-wrap: wrap;
 }
 .drawer-body .agenda-actions {
+  flex-basis: 100%;
   margin-left: 53px;
   max-width: none;
   justify-content: flex-start;
