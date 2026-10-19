@@ -302,6 +302,7 @@ export default function Modals({
                 email: text(d, "email"),
                 phone: text(d, "phone"),
                 school: text(d, "school"),
+                education: text(d, "education"),
                 major: text(d, "major"),
                 graduationYear: text(d, "graduationYear")
                   ? Number(d.get("graduationYear"))
@@ -374,6 +375,18 @@ export default function Modals({
           </Field>
           <Field label="专业">
             <input name="major" defaultValue={candidate?.major} />
+          </Field>
+          <Field label="最高学历" help="未知资料保留待核实，不推断学历">
+            <select
+              name="education"
+              defaultValue={candidate?.education || "unknown"}
+            >
+              <option value="unknown">待核实</option>
+              <option value="college">大专</option>
+              <option value="bachelor">本科</option>
+              <option value="master">硕士</option>
+              <option value="doctor">博士</option>
+            </select>
           </Field>
           <Field label="毕业年份" help="未知可留空，由 HR 核实毕业年份">
             <input

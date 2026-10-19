@@ -9,6 +9,11 @@ import type {
 } from "./domain.ts";
 import { createSeed } from "./seed.ts";
 import { parseCsv } from "./csv.ts";
+import {
+  handleSelectionAction,
+  SelectionError,
+  SELECTION_ACTIONS,
+} from "./selection.ts";
 
 export class BusinessError extends Error {
   code: string;
@@ -73,6 +78,11 @@ function candidateFields(input: Input, now: string): Omit<Candidate, "id"> {
   const year = yearText ? Number(yearText) : null;
   if (year !== null && (!Number.isInteger(year) || year < 1960 || year > 2100))
     fail("INVALID_YEAR", "毕业年份应为 1960–2100 的整数");
+  if (
+    input.education !== undefined &&
+    (typeof input.education !== "string" || input.education.trim().length > 40)
+  )
+    fail("INVALID_EDUCATION", "学历应为 40 字符以内的文本");
   return {
     name: required(input.name, "姓名"),
     email,
@@ -80,6 +90,7 @@ function candidateFields(input: Input, now: string): Omit<Candidate, "id"> {
     school: str(input.school),
     major: str(input.major),
     graduationYear: year,
+    ...(str(input.education) ? { education: str(input.education) } : {}),
     skills: [...new Set(list(input.skills))],
     resume: str(input.resume),
     availability: str(input.availability),
@@ -193,10 +204,25 @@ export function projectState(source: AppState, user: User): AppState {
     applicationIds.has(event.applicationId),
   );
   state.imports = user.role === "hr" ? state.imports : [];
+  state.scorecards = state.scorecards.map((card) => ({
+    ...card,
+    assistReport:
+      card.userId === user.id && card.status === "submitted"
+        ? card.assistReport
+        : undefined,
+  }));
   if (user.role === "interviewer") {
+    state.events = state.events.filter(
+      (event) => !SELECTION_ACTIONS.includes(event.type),
+    );
     state.candidates = state.candidates.map(restrictCandidate);
     state.applications = state.applications.map((app) => ({
       ...app,
+      selection: undefined,
+      outcome:
+        app.selection?.hrReview?.conclusion === "reject"
+          ? "本次投递已关闭"
+          : app.outcome,
       snapshot: restrictCandidate(app.snapshot),
       screeningNote: redactText(app.screeningNote),
       decisionNote: redactText(app.decisionNote),
@@ -210,6 +236,17 @@ export function projectState(source: AppState, user: User): AppState {
     state.scorecards = state.scorecards.map((card) => ({
       ...card,
       evidence: redactText(card.evidence),
+      assistReport: card.assistReport
+        ? {
+            ...card.assistReport,
+            summary: redactText(card.assistReport.summary),
+            gaps: card.assistReport.gaps.map(redactText),
+            evidence: card.assistReport.evidence.map((item) => ({
+              ...item,
+              quote: redactText(item.quote),
+            })),
+          }
+        : undefined,
     }));
   }
   return state;
@@ -823,6 +860,7 @@ export function applyAction(
       const reason = required(input.reason, "退回原因");
       card.status = "draft";
       card.submittedAt = "";
+      delete card.assistReport;
       app.decision = "pending";
       app.decisionNote = "";
       event(app, "scorecard_returned", "", "", reason);
@@ -1103,6 +1141,7 @@ export function applyAction(
           school: "",
           major: "",
           graduationYear: null,
+          education: "unknown",
           skills: [],
           resume: "个人信息已清理",
           availability: "",
@@ -1114,6 +1153,7 @@ export function applyAction(
         .forEach((app) => {
           appIds.add(app.id);
           clear(app.snapshot);
+          delete app.selection;
           app.screeningNote = "";
           app.decisionNote = "";
           app.offer.reference = "";
@@ -1140,6 +1180,7 @@ export function applyAction(
         .forEach((card) => {
           card.evidence = "";
           card.recommendation = "";
+          delete card.assistReport;
         });
       state.imports.forEach((task) =>
         task.rows.forEach((row) => {
@@ -1164,7 +1205,14 @@ export function applyAction(
       return fresh;
     }
     default:
-      fail("UNKNOWN_ACTION", "不支持的操作", 400);
+      try {
+        if (!handleSelectionAction(state, user, input, now))
+          fail("UNKNOWN_ACTION", "不支持的操作", 400);
+      } catch (error) {
+        if (error instanceof SelectionError)
+          throw new BusinessError(error.code, error.message, error.status);
+        throw error;
+      }
   }
   state.revision = source.revision + 1;
   return state;

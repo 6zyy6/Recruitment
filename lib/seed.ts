@@ -6,6 +6,13 @@ import type {
   Scorecard,
   User,
 } from "./domain.ts";
+import {
+  createAssessment,
+  submitAssessment,
+  runRuleReview,
+  runResumeReview,
+  interviewAssist,
+} from "./selection.ts";
 
 export const DEMO_USERS: User[] = [
   { id: "hr", name: "林知夏", role: "hr", email: "hr@example.com" },
@@ -80,6 +87,12 @@ export function createSeed(now = new Date()): AppState {
     description: `参与${d[1]}的关键业务，负责${d[4].split(",")[0]}相关工作。期待有主动性、善于协作的伙伴，共同解决真实用户问题。`,
     skills: d[4].split(","),
     dimensions: ["专业能力", "问题解决", "沟通协作", "岗位匹配"],
+    screeningPolicy: {
+      minimumEducation: "bachelor",
+      requiredSkills: d[4].split(",").slice(0, 2),
+      graduationYears: d[3] === "campus" ? [2027] : [],
+      updatedAt: at(-10),
+    },
     createdAt: at(-35 - i),
   }));
   const names = [
@@ -136,6 +149,14 @@ export function createSeed(now = new Date()): AppState {
     school: schools[i % schools.length],
     major: ["计算机科学", "信息管理", "统计学", "工业设计"][i % 4],
     graduationYear: [2021, 2022, 2027, 2027][i % 4],
+    education: [
+      "master",
+      "bachelor",
+      "unknown",
+      "college",
+      "bachelor",
+      "doctor",
+    ][i % 6],
     skills: jobs[i % 6].skills.slice(),
     resume: `${name}，${schools[i % schools.length]}毕业。具备${jobs[i % 6].skills.join("、")}相关实践经历，曾参与团队项目并负责需求分析与结果复盘。擅长跨团队沟通，关注用户反馈和业务结果。`,
     availability: i % 3 ? "Offer 后 2 周" : "随时到岗",
@@ -288,31 +309,116 @@ export function createSeed(now = new Date()): AppState {
       "onboarding",
       "joined",
     ];
-    route
-      .slice(0, route.indexOf(app.stage) + 1)
-      .forEach((stage, index) =>
-        state.events.push({
-          id: `event_${app.id}_${index}`,
-          applicationId: app.id,
-          actorId: "hr",
-          at:
-            stage === "offer"
-              ? app.offer.sentAt
-              : stage === "onboarding"
-                ? app.offer.answeredAt
-                : stage === "joined"
-                  ? app.joinedAt
-                  : new Date(
-                      new Date(app.createdAt).getTime() + index * 86400000,
-                    ).toISOString(),
-          type: index ? "advanced" : "created",
-          from: index ? route[index - 1] : "",
-          to: stage,
-          note: index
-            ? "合成演示数据：阶段推进"
-            : `通过${app.source}创建投递（合成演示数据）`,
-        }),
-      );
+    route.slice(0, route.indexOf(app.stage) + 1).forEach((stage, index) =>
+      state.events.push({
+        id: `event_${app.id}_${index}`,
+        applicationId: app.id,
+        actorId: "hr",
+        at:
+          stage === "offer"
+            ? app.offer.sentAt
+            : stage === "onboarding"
+              ? app.offer.answeredAt
+              : stage === "joined"
+                ? app.joinedAt
+                : new Date(
+                    new Date(app.createdAt).getTime() + index * 86400000,
+                  ).toISOString(),
+        type: index ? "advanced" : "created",
+        from: index ? route[index - 1] : "",
+        to: stage,
+        note: index
+          ? "合成演示数据：阶段推进"
+          : `通过${app.source}创建投递（合成演示数据）`,
+      }),
+    );
   });
+  // New/reset demo data includes real question snapshots and explicitly synthetic answer evidence.
+  for (const index of [0, 16]) {
+    const app = applications[index],
+      job = jobs.find((item) => item.id === app.jobId)!;
+    app.selection = {
+      assessments: [],
+      ruleReview: runRuleReview(job, app.snapshot, at(-1)),
+      resumeReview: runResumeReview(job, app.snapshot, at(-1)),
+    };
+  }
+  applications[0].selection!.hrReview = {
+    createdAt: at(-1),
+    actorId: "hr",
+    conclusion: "hold",
+    note: "合成演示记录：请电话核实个人负责范围和项目结果后再决定是否推进。",
+  };
+  for (const [index, kind] of [
+    [1, "written"],
+    [2, "preference"],
+    [3, "ai_interview"],
+    [8, "written"],
+    [17, "ai_interview"],
+  ] as const) {
+    const app = applications[index],
+      job = jobs.find((item) => item.id === app.jobId)!;
+    let task = createAssessment(kind, job, "hr", at(-2));
+    if (index === 2)
+      task = submitAssessment(
+        task,
+        {
+          preference_1: "4",
+          preference_2: "3",
+          preference_3: "5",
+          preference_4: "4",
+        },
+        at(-1),
+      );
+    if (index === 3)
+      task = submitAssessment(
+        task,
+        {
+          case: "【合成演示答卷】背景是用户反馈处理较慢；目标是明确问题优先级。我负责分析记录并采取行动，结果形成可追踪列表，复盘时继续核对用户反馈。",
+          collaboration:
+            "【合成演示答卷】分歧在于交付范围；我们通过沟通对齐约束，形成先验证再扩展的共识，后续每周核对进度。",
+        },
+        at(-1),
+      );
+    if (index === 8)
+      task = submitAssessment(
+        task,
+        {
+          priority: "b",
+          evidence: "c",
+          plan: "【合成演示答卷】先记录现状基线，再确定观察指标，通过小规模对照验证效果，最后进行复盘并记录结果。",
+        },
+        at(-1),
+      );
+    app.selection ??= { assessments: [] };
+    app.selection.assessments.push(task);
+    state.events.push({
+      id: `event_selection_${index}`,
+      applicationId: app.id,
+      actorId: "hr",
+      at: at(-1),
+      type:
+        task.status === "submitted" ? "submit_assessment" : "assign_assessment",
+      from: app.stage,
+      to: app.stage,
+      note: "合成甄选演示数据，未发送邀请或调用真实模型。",
+    });
+  }
+  const submittedCard = state.scorecards.find(
+    (card) => card.status === "submitted",
+  );
+  if (submittedCard) {
+    const interview = state.interviews.find(
+      (item) => item.id === submittedCard.interviewId,
+    )!;
+    const app = applications.find(
+      (item) => item.id === interview.applicationId,
+    )!;
+    submittedCard.assistReport = interviewAssist(
+      submittedCard,
+      jobs.find((item) => item.id === app.jobId)!,
+      at(-1),
+    );
+  }
   return state;
 }

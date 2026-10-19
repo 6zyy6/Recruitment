@@ -1,6 +1,7 @@
 import type { Metadata } from "next";
 import "./globals.css";
 import "./workspace.css";
+import "./selection.css";
 
 export const metadata: Metadata = {
   title: "拾才 TalentFlow · 招聘协作工作台",

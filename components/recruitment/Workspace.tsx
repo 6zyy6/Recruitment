@@ -29,6 +29,7 @@ import {
   AlertCircle,
   LogOut,
   ExternalLink,
+  ListFilter,
 } from "lucide-react";
 import type {
   AppState,
@@ -42,6 +43,7 @@ import type {
 import { STAGES, STAGE_LABELS, ROLE_LABELS } from "@/lib/domain";
 import { getMetrics } from "@/lib/metrics";
 import Modals from "./Modals";
+import SelectionCenter from "./SelectionCenter";
 import {
   Avatar,
   Badge,
@@ -60,6 +62,7 @@ type Page =
   | "overview"
   | "jobs"
   | "applications"
+  | "selection"
   | "interviews"
   | "offers"
   | "analytics"
@@ -68,6 +71,7 @@ const navigation = [
   { id: "overview", label: "工作台", icon: LayoutDashboard },
   { id: "jobs", label: "职位管理", icon: Briefcase },
   { id: "applications", label: "候选人与投递", icon: Users },
+  { id: "selection", label: "甄选与测评", icon: ListFilter },
   { id: "interviews", label: "面试日程", icon: Calendar },
   { id: "offers", label: "录用与入职", icon: FileCheck },
   { id: "analytics", label: "招聘分析", icon: BarChart3 },
@@ -76,6 +80,7 @@ const titles: Record<Page, string> = {
   overview: "招聘工作台",
   jobs: "职位管理",
   applications: "候选人与投递",
+  selection: "甄选与测评",
   interviews: "面试日程",
   offers: "录用与入职",
   analytics: "招聘分析",
@@ -145,6 +150,8 @@ export default function Workspace() {
     [board, setBoard] = useState(false),
     [selected, setSelected] = useState(""),
     [detailTab, setDetailTab] = useState("profile"),
+    [selectionAppId, setSelectionAppId] = useState(""),
+    [agendaFilter, setAgendaFilter] = useState("scheduled"),
     [modal, setModal] = useState<ModalState | null>(null),
     [quick, setQuick] = useState<{
       action: string;
@@ -242,6 +249,7 @@ export default function Workspace() {
       setType("all");
       setBatch("");
       setResult("all");
+      setSelectionAppId("");
       setToast("已切换演示账号");
     } catch (e) {
       setError(e instanceof Error ? e.message : "登录失败");
@@ -282,6 +290,11 @@ export default function Workspace() {
   function openApp(id: string) {
     setSelected(id);
     setDetailTab("profile");
+  }
+  function openSelection(id: string) {
+    setSelectionAppId(id);
+    setSelected("");
+    setPage("selection");
   }
   const state = snapshot?.state,
     user = snapshot?.user;
@@ -545,14 +558,35 @@ export default function Workspace() {
         {items.map((i) => {
           const app = state.applications.find((a) => a.id === i.applicationId)!;
           const own = i.interviewerIds.includes(user.id);
+          const dateParts = new Intl.DateTimeFormat("zh-CN", {
+            timeZone: "Asia/Shanghai",
+            month: "numeric",
+            day: "2-digit",
+            weekday: "short",
+          }).formatToParts(new Date(i.start));
+          const datePart = (type: string) =>
+            dateParts.find((p) => p.type === type)?.value || "";
+          const time = (value: string) =>
+            new Intl.DateTimeFormat("zh-CN", {
+              timeZone: "Asia/Shanghai",
+              hour: "2-digit",
+              minute: "2-digit",
+              hour12: false,
+            }).format(new Date(value));
           return (
             <div className="agenda-item" key={i.id}>
-              <div className="date-tile">
-                <small>{formatDate(i.start, { month: "short" })}</small>
-                <strong>
-                  {formatDate(i.start, { day: "2-digit", month: undefined })}
-                </strong>
-              </div>
+              <time
+                className="date-tile"
+                dateTime={i.start}
+                aria-label={formatDate(i.start, {
+                  year: "numeric",
+                  weekday: "long",
+                })}
+              >
+                <span>{datePart("month")}月</span>
+                <strong>{datePart("day")}</strong>
+                <small>{datePart("weekday")}</small>
+              </time>
               <div className="agenda-body">
                 <div className="agenda-title">
                   <button onClick={() => openApp(app.id)}>
@@ -575,7 +609,10 @@ export default function Workspace() {
                 </p>
                 <small>
                   <Clock size={12} />
-                  {dateTime(i.start)} · {i.location}
+                  <span className="agenda-time">
+                    {time(i.start)}–{time(i.end)}
+                  </span>
+                  <span className="agenda-location">{i.location}</span>
                 </small>
                 <small>
                   面试官：
@@ -583,6 +620,16 @@ export default function Workspace() {
                 </small>
               </div>
               <div className="agenda-actions">
+                <button
+                  className="button small"
+                  onClick={() => {
+                    openApp(app.id);
+                    setDetailTab("interviews");
+                  }}
+                >
+                  查看详情
+                  <ChevronRight size={13} />
+                </button>
                 {isHR && i.status === "scheduled" && (
                   <>
                     <button
@@ -680,23 +727,30 @@ export default function Workspace() {
         </div>
         <div className="nav-caption">招聘管理</div>
         <nav>
-          {navigation.map(({ id, label, icon: Icon }) => (
-            <button
-              key={id}
-              aria-label={label}
-              onClick={() => {
-                setPage(id);
-                setJobId("");
-                setResult("all");
-              }}
-              className={page === id ? "active" : ""}
-            >
-              <Icon size={18} />
-              <span>{label}</span>
-              {id === "applications" && <b>{state.applications.length}</b>}
-              {id === "interviews" && pendingCards.length > 0 && <i />}
-            </button>
-          ))}
+          {navigation
+            .filter(
+              (item) =>
+                item.id !== "selection" ||
+                user.role === "hr" ||
+                user.role === "manager",
+            )
+            .map(({ id, label, icon: Icon }) => (
+              <button
+                key={id}
+                aria-label={label}
+                onClick={() => {
+                  setPage(id);
+                  setJobId("");
+                  setResult("all");
+                }}
+                className={page === id ? "active" : ""}
+              >
+                <Icon size={18} />
+                <span>{label}</span>
+                {id === "applications" && <b>{state.applications.length}</b>}
+                {id === "interviews" && pendingCards.length > 0 && <i />}
+              </button>
+            ))}
         </nav>
         <div className="sidebar-bottom">
           <div className="demo-callout">
@@ -785,6 +839,7 @@ export default function Workspace() {
                     jobs: "让用人需求、招聘标准与业务团队保持一致。",
                     applications:
                       "一个人才档案，多次独立投递，每一步都有依据。",
+                    selection: "从条件核对到能力评估，让每一步甄选都有证据。",
                     interviews: "协调每一场面试，及时沉淀每一份评价。",
                     offers: "从录用意向到实际到岗，分别确认每一个结果。",
                     analytics: "用一致的数据口径，找到招聘流程中的改进机会。",
@@ -830,7 +885,7 @@ export default function Workspace() {
               </button>
             </div>
           )}
-          {page !== "settings" && (
+          {page !== "settings" && page !== "selection" && (
             <div className="filter-bar">
               <div className="type-tabs">
                 {(["all", "social", "campus"] as const).map((t) => (
@@ -1073,10 +1128,7 @@ export default function Workspace() {
                         <ListChecksIcon />
                         <div>
                           <strong>让每次判断都有依据</strong>
-                          <p>
-                            先核对岗位条件，再记录人工结论。AI
-                            与测评扩展将单独验证。
-                          </p>
+                          <p>先核对岗位条件，再结合测评证据，记录人工结论。</p>
                         </div>
                       </div>
                     </div>
@@ -1388,13 +1440,101 @@ export default function Workspace() {
                 </Section>
               )}
               {page === "interviews" && (
-                <Section
-                  title="面试安排与反馈"
-                  subtitle="从投递详情安排新面试；系统内冲突校验，外部通知由 HR 完成"
-                  action={<Badge tone="blue">{interviews.length} 场记录</Badge>}
-                >
-                  {agenda(interviews)}
-                </Section>
+                <>
+                  <div className="agenda-summary">
+                    <div>
+                      <Calendar size={20} />
+                      <span>
+                        待进行
+                        <strong>
+                          {
+                            interviews.filter((i) => i.status === "scheduled")
+                              .length
+                          }
+                          <small> 场</small>
+                        </strong>
+                      </span>
+                    </div>
+                    <div>
+                      <FileText size={20} />
+                      <span>
+                        待收齐评价
+                        <strong>
+                          {pendingCards.length}
+                          <small> 场</small>
+                        </strong>
+                      </span>
+                    </div>
+                    <div>
+                      <CheckCircle2 size={20} />
+                      <span>
+                        已完成
+                        <strong>
+                          {
+                            interviews.filter((i) => i.status === "completed")
+                              .length
+                          }
+                          <small> 场</small>
+                        </strong>
+                      </span>
+                    </div>
+                  </div>
+                  <Section
+                    title="面试安排与反馈"
+                    subtitle="北京时间 · 从候选人详情安排面试，通知由 HR 人工确认"
+                    action={
+                      <Badge tone="blue">{interviews.length} 场记录</Badge>
+                    }
+                  >
+                    <div className="agenda-toolbar">
+                      <div
+                        className="agenda-view-tabs"
+                        role="group"
+                        aria-label="面试记录状态"
+                      >
+                        {[
+                          ["scheduled", "待进行"],
+                          ["feedback", "待评价"],
+                          ["completed", "已完成"],
+                          ["all", "全部记录"],
+                        ].map(([value, label]) => (
+                          <button
+                            key={value}
+                            aria-pressed={agendaFilter === value}
+                            className={agendaFilter === value ? "active" : ""}
+                            onClick={() => setAgendaFilter(value)}
+                          >
+                            {label}
+                          </button>
+                        ))}
+                      </div>
+                      <span>按面试时间排列</span>
+                    </div>
+                    {agenda(
+                      interviews
+                        .filter(
+                          (i) =>
+                            agendaFilter === "all" ||
+                            (agendaFilter === "feedback"
+                              ? pendingCards.some((p) => p.id === i.id)
+                              : i.status === agendaFilter),
+                        )
+                        .sort((a, b) =>
+                          agendaFilter === "completed"
+                            ? b.start.localeCompare(a.start)
+                            : a.start.localeCompare(b.start),
+                        ),
+                    )}
+                  </Section>
+                </>
+              )}
+              {page === "selection" && (
+                <SelectionCenter
+                  state={state}
+                  user={user}
+                  onAction={action}
+                  initialApplicationId={selectionAppId}
+                />
               )}
               {page === "offers" && (
                 <Section
@@ -1709,7 +1849,7 @@ export default function Workspace() {
                           "规则核对",
                           "已实现",
                           "blue",
-                          "按岗位技能与毕业届别核对，缺失信息待核实；学历条件配置后续扩展。",
+                          "配置最低学历、必需技能与届别；逐项给出符合、未符合或待核实，不自动淘汰。",
                         ],
                         [
                           "HR 复核",
@@ -1725,21 +1865,21 @@ export default function Workspace() {
                         ],
                         [
                           "AI 简历复筛",
-                          "待接入",
-                          "neutral",
-                          "输出匹配证据和待核实问题，当前未调用模型。",
+                          "规则演示",
+                          "violet",
+                          "可生成并保存匹配报告、原文证据和缺口。当前用固定规则模拟，未调用真实模型。",
                         ],
                         [
-                          "性格测评与笔试",
-                          "待接入",
-                          "neutral",
-                          "按岗位选用经验证的测评或工作样本，不凭类型标签自动淘汰。",
+                          "工作偏好问卷与笔试",
+                          "已实现",
+                          "blue",
+                          "支持指派、作答和报告。笔试按标准答案判分；工作偏好问卷用于交流，不输出录用总分。",
                         ],
                         [
                           "AI 面试与辅助评分",
-                          "待接入",
-                          "neutral",
-                          "评分需量表、回答证据和人工复核；AI 不能保证更客观。",
+                          "规则演示",
+                          "violet",
+                          "文本问答与固定规则评分可操作；独立人工评价提交后可核对证据，不改写人工分数。真实模型待接入。",
                         ],
                       ].map(([title, status, tone, desc]) => (
                         <div key={title}>
@@ -1937,81 +2077,87 @@ export default function Workspace() {
                       01 <span>岗位条件核对</span>
                       <Badge tone="blue">规则核对</Badge>
                     </h3>
-                    {activeJob.skills.map((skill) => {
-                      const has = activeApp.snapshot.skills.some(
-                        (s) => s.toLowerCase() === skill.toLowerCase(),
-                      );
-                      return (
-                        <div className="evidence-row" key={skill}>
-                          <span className={`evidence-icon ${has ? "yes" : ""}`}>
-                            {has ? <Check size={13} /> : <Circle size={13} />}
-                          </span>
-                          <span>
-                            <strong>{skill}</strong>
-                            <small>
-                              {has
-                                ? `资料技能字段包含 ${skill}`
-                                : "未找到对应的已确认技能，需人工核实"}
-                            </small>
-                          </span>
-                          <Badge tone={has ? "green" : "amber"}>
-                            {has ? "有证据" : "待核实"}
-                          </Badge>
-                        </div>
-                      );
-                    })}
-                    {activeJob.type === "campus" && (
-                      <div className="evidence-row">
-                        <GraduationCap size={17} />
-                        <span>
-                          <strong>
-                            允许届别：{activeJob.graduationYears.join("、")}
-                          </strong>
-                          <small>
-                            候选人：
-                            {activeApp.snapshot.graduationYear || "未提供"}
-                          </small>
-                        </span>
-                        <Badge
-                          tone={
-                            activeApp.snapshot.graduationYear &&
-                            activeJob.graduationYears.includes(
-                              activeApp.snapshot.graduationYear,
-                            )
-                              ? "green"
-                              : "amber"
-                          }
-                        >
-                          {!activeApp.snapshot.graduationYear
-                            ? "待核实"
-                            : activeJob.graduationYears.includes(
-                                  activeApp.snapshot.graduationYear,
-                                )
-                              ? "满足"
-                              : "需复核"}
-                        </Badge>
-                      </div>
+                    {activeApp.selection?.ruleReview ? (
+                      activeApp.selection.ruleReview.evidence.map(
+                        (item, index) => (
+                          <div className="evidence-row" key={index}>
+                            <span
+                              className={`evidence-icon ${item.status === "matched" ? "yes" : ""}`}
+                            >
+                              {item.status === "matched" ? (
+                                <Check size={13} />
+                              ) : (
+                                <Circle size={13} />
+                              )}
+                            </span>
+                            <span>
+                              <strong>{item.label}</strong>
+                              <small>{item.quote}</small>
+                            </span>
+                            <Badge
+                              tone={
+                                item.status === "matched" ? "green" : "amber"
+                              }
+                            >
+                              {item.status === "matched"
+                                ? "符合"
+                                : item.status === "missing"
+                                  ? "未符合"
+                                  : "待核实"}
+                            </Badge>
+                          </div>
+                        ),
+                      )
+                    ) : (
+                      <p className="detail-note">
+                        尚未生成核对报告。到甄选中心配置岗位条件并执行核对，资料缺失会保留为待核实。
+                      </p>
                     )}
                   </div>
                   <div className="detail-section">
                     <h3>
                       02 <span>AI 简历复筛</span>
-                      <Badge>待接入</Badge>
+                      <Badge tone="violet">规则模拟</Badge>
                     </h3>
                     <p className="detail-note">
-                      当前未调用模型，不生成 AI
-                      匹配分数。后续将提供岗位证据摘要与待核实问题，交由 HR
-                      复核。
+                      {activeApp.selection?.resumeReview?.summary ||
+                        "在甄选中心生成岗位匹配报告，逐项查看简历证据和待核实问题。"}
                     </p>
+                    <p className="detail-note">
+                      未调用大模型，模拟报告不代替 HR 的筛选结论。
+                    </p>
+                    {(isHR || user.role === "manager") && (
+                      <button
+                        className="button small primary"
+                        onClick={() => openSelection(activeApp.id)}
+                      >
+                        打开甄选与测评
+                        <ArrowRight size={14} />
+                      </button>
+                    )}
                   </div>
                   <div className="detail-section">
                     <h3>
                       03 <span>HR 复核结论</span>
                     </h3>
                     <div className="review-note">
-                      {activeApp.screeningNote ||
+                      {activeApp.selection?.hrReview?.note ||
+                        activeApp.screeningNote ||
                         "尚未填写筛选结论。推进到面试前，HR 需记录筛选依据。"}
                     </div>
+                    {activeApp.selection?.hrReview && (
+                      <small className="muted">
+                        {person(state, activeApp.selection.hrReview.actorId)} ·{" "}
+                        {dateTime(activeApp.selection.hrReview.createdAt)} ·{" "}
+                        {
+                          {
+                            pass: "通过初筛",
+                            hold: "待进一步核实",
+                            reject: "不予推进",
+                          }[activeApp.selection.hrReview.conclusion]
+                        }
+                      </small>
+                    )}
                   </div>
                   <div className="detail-section">
                     <h3>
@@ -2152,6 +2298,64 @@ export default function Workspace() {
                               <small>
                                 结论：{c.recommendation || "未填写"}
                               </small>
+                              {c.userId === user.id &&
+                                c.status === "submitted" && (
+                                  <div className="assist-review">
+                                    <div className="assist-review-heading">
+                                      <strong>AI 辅助评价</strong>
+                                      <Badge tone="violet">
+                                        规则模拟 · 未调用大模型
+                                      </Badge>
+                                    </div>
+                                    {c.assistReport ? (
+                                      <>
+                                        <p>{c.assistReport.summary}</p>
+                                        {c.assistReport.evidence.map(
+                                          (e, index) => (
+                                            <div
+                                              className="assist-evidence"
+                                              key={index}
+                                            >
+                                              <strong>{e.label}</strong>
+                                              <span>{e.quote}</span>
+                                            </div>
+                                          ),
+                                        )}
+                                        {c.assistReport.gaps.length > 0 && (
+                                          <p className="muted">
+                                            待补充：
+                                            {c.assistReport.gaps.join("；")}
+                                          </p>
+                                        )}
+                                        <small>
+                                          {c.assistReport.disclaimer}
+                                        </small>
+                                      </>
+                                    ) : (
+                                      <p>
+                                        你已完成独立评价。现在可以核对评分证据是否充分，报告不会改写你的分数。
+                                      </p>
+                                    )}
+                                    <button
+                                      className="button small"
+                                      disabled={busy}
+                                      onClick={() =>
+                                        run("generate_interview_assist", {
+                                          scorecardId: c.id,
+                                        })
+                                      }
+                                    >
+                                      {busy ? (
+                                        <Spinner />
+                                      ) : (
+                                        <FileText size={14} />
+                                      )}
+                                      {c.assistReport
+                                        ? "重新核对评价证据"
+                                        : "生成辅助评价报告"}
+                                    </button>
+                                  </div>
+                                )}
                               {isHR &&
                                 c.status === "submitted" &&
                                 activeApp.stage === "interview" && (
@@ -2185,8 +2389,8 @@ export default function Workspace() {
                       </div>
                     ))}
                   <div className="info-strip">
-                    性格测评、笔试、AI 面试及 AI 辅助评分待接入。AI
-                    评分需量表、回答证据和人工复核。
+                    笔试、工作偏好问卷和文本面试可在甄选与测评中心体验。AI
+                    报告当前使用固定规则模拟，需人工复核。
                   </div>
                   {activeApp.decisionNote && (
                     <div className="detail-section">

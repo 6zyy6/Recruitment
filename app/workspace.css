@@ -921,19 +921,28 @@ button:not(.primary):hover {
 .agenda-item {
   display: flex;
   align-items: center;
-  gap: 15px;
-  padding: 17px 0;
+  gap: 18px;
+  padding: 20px 0;
   border-top: 1px solid var(--border);
 }
 .date-tile {
-  width: 42px;
-  min-height: 49px;
+  width: 64px;
+  min-height: 78px;
   text-align: center;
-  background: var(--background);
-  border: 1px solid var(--border);
-  border-radius: 7px;
+  background: var(--color-blue-soft);
+  border: 1px solid var(--color-blue-border);
+  border-radius: 10px;
   flex: none;
-  padding: 4px;
+  padding: 7px 8px;
+  color: var(--primary);
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+.date-tile > span {
+  font-size: 10px;
+  line-height: 1.5;
+  display: block;
+  font-weight: 600;
 }
 .date-tile small {
   font-size: 9px;
@@ -941,10 +950,10 @@ button:not(.primary):hover {
   color: var(--muted-foreground);
 }
 .date-tile strong {
-  font-size: 19px;
-  line-height: 1.1;
+  font-size: 28px;
+  line-height: 1.15;
   display: block;
-  font-weight: 550;
+  font-weight: 650;
 }
 .agenda-body {
   min-width: 0;
@@ -959,11 +968,11 @@ button:not(.primary):hover {
   background: none;
   border: 0;
   padding: 0;
-  font-size: 12px;
+  font-size: 13px;
   font-weight: 600;
 }
 .agenda-body p {
-  font-size: 10px;
+  font-size: 11px;
   color: var(--color-sub);
   margin: 4px 0;
 }
@@ -972,8 +981,123 @@ button:not(.primary):hover {
   align-items: center;
   gap: 4px;
   color: var(--muted-foreground);
-  font-size: 10px;
+  font-size: 11px;
   margin-top: 3px;
+}
+.agenda-time {
+  color: var(--color-sub);
+  white-space: nowrap;
+}
+.agenda-location {
+  padding-left: 8px;
+  border-left: 1px solid var(--border);
+  margin-left: 5px;
+  overflow-wrap: anywhere;
+}
+.agenda-body small > svg {
+  flex: none;
+}
+.agenda-summary {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  margin-bottom: 22px;
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  background: var(--card);
+}
+.agenda-summary > div {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  padding: 22px 26px;
+}
+.agenda-summary > div + div {
+  border-left: 1px solid var(--border);
+}
+.agenda-summary > div > svg {
+  color: var(--primary);
+}
+.agenda-summary span {
+  color: var(--color-sub);
+  font-size: 11px;
+}
+.agenda-summary strong {
+  display: block;
+  color: var(--foreground);
+  font-size: 26px;
+  line-height: 1.35;
+  font-weight: 650;
+}
+.agenda-summary strong small {
+  font-size: 11px;
+  font-weight: 400;
+  color: var(--muted-foreground);
+}
+.agenda-toolbar {
+  padding: 0 21px 16px;
+  display: flex;
+  justify-content: space-between;
+  gap: 12px;
+  align-items: center;
+}
+.agenda-toolbar > span {
+  color: var(--muted-foreground);
+  font-size: 10px;
+}
+.agenda-view-tabs {
+  display: flex;
+  align-items: center;
+  padding: 3px;
+  border-radius: 7px;
+  background: var(--muted);
+  gap: 3px;
+}
+.agenda-view-tabs button {
+  border: 0;
+  background: none;
+  color: var(--muted-foreground);
+  border-radius: 5px;
+  padding: 6px 12px;
+  font-size: 11px;
+  white-space: nowrap;
+}
+.agenda-view-tabs button.active {
+  color: var(--primary);
+  background: var(--card);
+  font-weight: 600;
+  box-shadow: 0 1px 3px var(--color-shadow);
+}
+.agenda-view-tabs button:hover {
+  color: var(--primary);
+}
+.assist-review {
+  margin-top: 15px;
+  padding: 15px;
+  background: var(--color-blue-soft);
+  border: 1px solid var(--color-blue-border);
+  border-radius: 8px;
+}
+.assist-review-heading {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+.assist-evidence {
+  display: grid;
+  gap: 4px;
+  padding: 10px 0;
+  border-top: 1px solid var(--color-blue-border);
+  font-size: 11px;
+}
+.assist-evidence span {
+  color: var(--color-sub);
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+.assist-review > button {
+  margin-top: 12px;
 }
 .agenda-actions {
   display: flex;
@@ -2494,6 +2618,30 @@ button:not(.primary):hover {
   }
 }
 @media (max-width: 600px) {
+  .agenda-summary > div {
+    padding: 14px 10px;
+    gap: 7px;
+  }
+  .agenda-summary > div > svg {
+    display: none;
+  }
+  .agenda-summary strong {
+    font-size: 22px;
+  }
+  .agenda-toolbar {
+    padding: 0 15px 14px;
+  }
+  .agenda-toolbar > span {
+    display: none;
+  }
+  .agenda-view-tabs {
+    width: 100%;
+  }
+  .agenda-view-tabs button {
+    flex: 1;
+    padding: 7px 5px;
+    font-size: 10px;
+  }
   .sidebar {
     width: 58px;
     padding: 16px 5px;

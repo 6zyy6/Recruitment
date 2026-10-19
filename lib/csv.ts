@@ -52,6 +52,8 @@ export function parseCsv(source: string): Record<string, string>[] {
     专业: "major",
     毕业年份: "graduationYear",
     技能: "skills",
+    学历: "education",
+    最高学历: "education",
     简历: "resume",
     到岗时间: "availability",
     渠道: "source",

@@ -13,6 +13,78 @@ export interface User {
   role: Role;
   email: string;
 }
+export type EducationLevel =
+  | "any"
+  | "college"
+  | "bachelor"
+  | "master"
+  | "doctor";
+export interface ScreeningPolicy {
+  minimumEducation: EducationLevel;
+  requiredSkills: string[];
+  graduationYears: number[];
+  updatedAt: string;
+}
+export interface SelectionEvidence {
+  label: string;
+  status: "matched" | "missing" | "unknown" | "info";
+  quote: string;
+  points?: number;
+  maxPoints?: number;
+}
+export interface SelectionReport {
+  createdAt: string;
+  kind:
+    | "rule"
+    | "resume"
+    | "written"
+    | "preference"
+    | "ai_interview"
+    | "interview_assist";
+  mode: "rule_demo";
+  ruleVersion?: string;
+  title: string;
+  summary: string;
+  score: number | null;
+  maxScore: number | null;
+  evidence: SelectionEvidence[];
+  gaps: string[];
+  disclaimer: string;
+  policy?: ScreeningPolicy;
+}
+export type AssessmentKind = "written" | "preference" | "ai_interview";
+export interface AssessmentQuestion {
+  id: string;
+  prompt: string;
+  type: "single_choice" | "text" | "likert";
+  options?: { value: string; label: string }[];
+  required: boolean;
+  minLength?: number;
+  maxLength?: number;
+}
+export interface Assessment {
+  id: string;
+  kind: AssessmentKind;
+  title: string;
+  status: "assigned" | "submitted";
+  assignedAt: string;
+  assignedBy: string;
+  questions: AssessmentQuestion[];
+  answers: Record<string, string>;
+  submittedAt: string;
+  report?: SelectionReport;
+}
+export interface ApplicationSelection {
+  ruleReview?: SelectionReport;
+  resumeReview?: SelectionReport;
+  hrReview?: {
+    createdAt: string;
+    actorId: string;
+    conclusion: "pass" | "hold" | "reject";
+    note: string;
+  };
+  assessments: Assessment[];
+}
 export interface Job {
   id: string;
   title: string;
@@ -28,6 +100,7 @@ export interface Job {
   description: string;
   skills: string[];
   dimensions: string[];
+  screeningPolicy?: ScreeningPolicy;
   createdAt: string;
 }
 export interface Candidate {
@@ -38,6 +111,7 @@ export interface Candidate {
   school: string;
   major: string;
   graduationYear: number | null;
+  education?: string;
   skills: string[];
   resume: string;
   availability: string;
@@ -70,6 +144,7 @@ export interface Application {
   agreement: { type: string; status: string; date: string; note: string };
   plannedJoinDate: string;
   joinedAt: string;
+  selection?: ApplicationSelection;
 }
 export interface Interview {
   id: string;
@@ -91,6 +166,7 @@ export interface Scorecard {
   recommendation: string;
   status: "draft" | "submitted";
   submittedAt: string;
+  assistReport?: SelectionReport;
 }
 export interface Activity {
   id: string;
