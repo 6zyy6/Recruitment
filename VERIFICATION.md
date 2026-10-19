@@ -21,10 +21,21 @@
 - 发现并修正三个 HTTP 脚本的旧契约：未知资料不再被断言为阻断复筛；复用已有效的真实报告；模型失败时独立接口检查继续，依赖真实报告的场景明确跳过。脚本语法、ESLint、diff 检查通过，未为测试修改生产门槛。
 - 公开投递自动生成当前初筛并排队复筛，匿名不调用付费模型、不自动发信。已补未知条件不能绕过 HR/面试/录用门槛、共享联系方式原样确认、新邮箱冲突及核对更正后撤销面试邀请等回归。
 - 浏览器核对“项目说明与设置”的六个核心模块、职责、入口与交付边界。最新模块概览截图 `outputs/demo-core-modules-overview-final.png`；1280 像素无全局横向溢出，本轮重启后的检查无新 error 日志。此前已验证 375/1024/1280 及六个入口，未把本轮说明页检查算作全部业务页重新人工验收。
-- Sites 配置保存到环境修订 2：保留 Gmail 六项配置并加入 DeepSeek secret / model。配置就绪不表示 Gmail refresh token 已连接或真实邮件已发送；真实 OAuth / 收信闭环由邮件专项聊天接续验收。密钥未进入源码、截图或日志。
+- Sites 配置保存到环境修订 2：保留 Gmail 六项配置并加入 DeepSeek secret / model。v6 已成功发布（提交 `f85ab312286ff08d626372a89eaf726a2e57df49`，部署 `appgdep_6ad663cec4b881919751b2f5b2662910`，环境修订 2），URL 保持 `https://talentflow-recruiting-demo.swoonytune34.chatgpt.site`。密钥未进入源码、截图或日志。
+- v6 线上匿名检查：首页 HTTP 307 跳站点登录；招聘 API 及仅用 Demo 密码登录均为 401 `MAIL_SIGN_IN_REQUIRED`；公开职位 HTTP 200，只返回 jobs（6 个）。Gmail 状态识别配置就绪，但 anonymous `canManage=false`、未连接、不暴露发件邮箱。此检查不替代真实用户成功登录及伪造身份头剥离验收。
+- 邮件专项聊天在正式 `/mail-connect` 进入所有者登录流程，首次 OpenAI 返回 `400 Invalid content type: text/html`，正常重试后触发 Cloudflare 人机验证；已留给用户亲自完成。尚未取得托管身份成功，Google `gmail.send` OAuth 尚未走到，真实发信与收信均为 0。不能将配置就绪认定为邮箱已接通。
 - 已正常合并公开候选人 v5 的 Git 历史与当前实现，无强推；当前站点受众为 public 并保持不变。本轮由本聊天统一发布，实际版本、提交与部署结果另存 `outputs/unified-release.json`。
 
 六个核心模块及代码边界见 [架构与交付说明](docs/architecture.md)，业务规则对应检查见 [测试映射](docs/tests.md)。当前托管存储仍为 D1；MySQL / Redis 为独立本地分支，未合入本次 Sites 发布。企业 SSO、多租户、生产备份恢复、容量/负载、完整资料治理及模型效果/偏差评估仍未验收。
+
+### 候选人视觉增量
+
+v6 后精确接入独立聊天冻结的 `app/careers.css`、`components/recruitment/Careers.tsx` 两文件。逐字审查表单上传、字段、同意说明、payload、请求幂等与提交逻辑保持一致；新增筛选重置、招聘类型总量、行式职位目录与成功回执锚点，未覆盖其它源码或后端模块。
+
+- TypeScript、CSS PostCSS 语法、官方 Sites 构建通过。
+- 两文件 ESLint 有 2 个错误与 1 个 ref 警告，已用 v6 基线逐项复核为既有问题（effect 内同步 setState、原生企业入口链接及 cleanup ref）；未加入抑制或改动旧生命周期逻辑。CSS 未配置 ESLint，另作语法验证。未声称全仓 lint 通过。
+- 320/375/768/1280 像素均无全局横向溢出，校招 + 北京只剩研发培训生。浏览器填写合成姓名、example.com 邮箱及正文，明确同意后实际提交，显示唯一回执；375 像素回执与 `career-application` 锚点存在、无溢出，本轮无新 error 日志。截图 `outputs/careers-filter-final.png`、`outputs/careers-receipt-final.png`。
+- 本增量不改后端，沿用上述 217 项单测及五组 HTTP 证据，没有将旧测试改称重新全跑。统一发布结果见 `outputs/unified-release.json`。
 
 ## 核心模块质量补强 2026-10-20
 

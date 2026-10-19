@@ -88,13 +88,15 @@ export default function Careers() {
         <a className="career-brand" href="/careers" aria-label="拾才招聘首页">
           <span className="brand-icon">T</span>
           <span>拾才 <small>TalentFlow</small></span>
+          <span className="career-brand-divider" />
+          <span className="career-brand-label">招聘</span>
         </a>
         <nav aria-label="招聘导航">
           <a className="career-nav-current" href="/careers">在招职位</a>
-          <a href="/">企业工作台 <ArrowUpRight size={14} /></a>
+          <a className="career-employer-link" href="/">企业入口 <ArrowUpRight size={14} /></a>
         </nav>
       </header>
-      <div className="career-demo"><ShieldCheck size={15} /><span>招聘体验演示 · 请使用合成资料投递，勿提交真实个人信息。</span></div>
+      <div className="career-demo"><ShieldCheck size={14} /><span>当前为招聘演示，请使用合成资料体验投递。</span></div>
       <main id="career-main" className="career-main">
         {loading ? (
           <div className="career-loading" aria-busy="true" aria-label="正在加载招聘职位">
@@ -111,7 +113,6 @@ export default function Careers() {
             <a href="/careers" className="career-back"><ArrowLeft size={16} />所有职位</a>
             <div className="career-detail-grid">
               <section className="career-job-detail">
-                <div className="eyebrow">YOUR NEXT CHAPTER</div>
                 <div className="career-title-row"><Badge tone={job.type === "campus" ? "violet" : "blue"}>{job.type === "campus" ? "校园招聘" : "社会招聘"}</Badge><span className="career-open"><span />招聘中</span></div>
                 <h1>{job.title}</h1>
                 <JobMeta job={job} />
@@ -130,18 +131,36 @@ export default function Careers() {
         ) : (
           <>
             <section className="career-intro">
-              <div><div className="eyebrow">OPPORTUNITIES AT TALENTFLOW</div><h1>你的下一站，<br /><span>从这里开始。</span></h1><p>找到适合你的职位，让我们从一份简历开始了解。</p></div>
-              <aside className="career-intro-note"><span className="career-note-icon"><FileText size={24} /></span><h2>好机会，直接投。</h2><p>选职位 · 传简历 · 确认投递</p><small>无需企业账号，提交后即可获得回执。</small><a href="#career-jobs">探索在招职位 <ArrowRight size={16} /></a></aside>
-            </section>
-            <section id="career-jobs" aria-labelledby="career-jobs-title">
-              <div className="career-section-head"><div><h2 id="career-jobs-title">寻找你的机会 <span>{jobs.length}</span></h2><p>社会招聘与校园招聘，都在这里。</p></div></div>
-              <div className="career-filters">
-                <div className="career-search"><Search size={18} /><input aria-label="搜索职位、部门或技能" placeholder="搜索职位、部门或技能" type="search" value={query} onChange={(event) => setQuery(event.target.value)} /></div>
-                <select aria-label="工作城市" value={city} onChange={(event) => setCity(event.target.value)}><option value="">所有城市</option>{[...new Set(jobs.map((item) => item.location))].sort().map((location) => <option key={location} value={location}>{location}</option>)}</select>
+              <h1>让才华，<br /><span>遇见好机会。</span></h1>
+              <div className="career-intro-copy">
+                <p>从校园出发，或带着经验再进一步。<br />在这里，找到与你契合的工作。</p>
+                <a href="#career-jobs">探索职位机会 <ArrowRight size={17} /></a>
               </div>
-              <div className="career-list-head"><div className="career-types" aria-label="招聘类型">{[["all", "全部职位"], ["social", "社会招聘"], ["campus", "校园招聘"]].map(([value, label]) => <button key={value} aria-pressed={type === value} className={type === value ? "active" : ""} onClick={() => setType(value)}>{label}</button>)}</div><span aria-live="polite">{visible.length} 个职位</span></div>
-              {visible.length ? <div className="career-jobs">{visible.map((item) => <a className="career-job-card" href={`/careers?job=${encodeURIComponent(item.id)}`} key={item.id}><div><div className="career-card-type"><span>{item.type === "campus" ? "CAMPUS" : "EXPERIENCED"}</span><Badge tone={item.type === "campus" ? "violet" : "blue"}>{item.type === "campus" ? "校招" : "社招"}</Badge></div><h3>{item.title}</h3><JobMeta job={item} /><div className="career-card-skills">{item.skills.slice(0, 3).map((skill) => <span key={skill}>{skill}</span>)}</div></div><span className="career-card-cta">查看并投递 <ArrowUpRight size={18} /></span></a>)}</div> : <div className="career-empty"><SearchX size={30} /><h3>{jobs.length ? "暂时没有匹配的职位" : "暂时没有开放职位"}</h3><p>{jobs.length ? "试试其他关键词、城市或招聘类型。" : "招聘机会更新后将在这里展示，欢迎之后再来。"}</p>{jobs.length > 0 && <button className="button" onClick={() => { setQuery(""); setCity(""); setType("all"); }}>清除筛选条件</button>}</div>}
             </section>
+            <section id="career-jobs" className="career-directory" aria-labelledby="career-jobs-title">
+              <aside className="career-filter-panel" aria-label="筛选职位">
+                <div className="career-filter-heading"><h2>筛选职位</h2>{(query || city || type !== "all") && <button onClick={() => { setQuery(""); setCity(""); setType("all"); }}>重置</button>}</div>
+                <div className="career-filters">
+                  <label className="career-filter-field"><span>关键词</span><span className="career-search"><Search size={16} /><input aria-label="搜索职位、部门或技能" placeholder="职位、部门或技能" type="search" value={query} onChange={(event) => setQuery(event.target.value)} /></span></label>
+                  <label className="career-filter-field"><span>工作城市</span><select aria-label="工作城市" value={city} onChange={(event) => setCity(event.target.value)}><option value="">所有城市</option>{[...new Set(jobs.map((item) => item.location))].sort().map((location) => <option key={location} value={location}>{location}</option>)}</select></label>
+                </div>
+                <div className="career-types" aria-label="招聘类型">
+                  {[["all", "全部职位"], ["social", "社会招聘"], ["campus", "校园招聘"]].map(([value, label]) => <button key={value} aria-pressed={type === value} className={type === value ? "active" : ""} onClick={() => setType(value)}><span>{label}</span><span>{jobs.filter((item) => value === "all" || item.type === value).length}</span></button>)}
+                </div>
+                <p className="career-filter-note">找到合适的职位后，<br />上传简历，即可直接投递。</p>
+              </aside>
+              <div className="career-results">
+                <div className="career-results-heading"><h2 id="career-jobs-title">开放职位 <span aria-live="polite">{String(visible.length).padStart(2, "0")}</span></h2><p>寻找一个值得投入的机会。</p></div>
+                {visible.length ? <>
+                  <div className="career-table-head" aria-hidden="true"><span>职位名称</span><span>所属部门</span><span>工作城市</span><span>招聘类型</span><span /></div>
+                  <div className="career-jobs">{visible.map((item) => <a className="career-job-row" href={`/careers?job=${encodeURIComponent(item.id)}`} key={item.id}>
+                    <div className="career-role-title"><h3>{item.title}</h3><p className="career-role-skills">{item.skills.slice(0, 3).join(" · ")}</p><p className="career-role-mobile-meta">{item.department}<span>·</span>{item.location}<span>·</span>{item.type === "campus" ? "校园招聘" : "社会招聘"}</p></div>
+                    <span className="career-role-department">{item.department}</span><span className="career-role-location">{item.location}</span><span className="career-role-type"><i />{item.type === "campus" ? "校园招聘" : "社会招聘"}</span><span className="career-role-arrow"><ArrowUpRight size={20} /></span>
+                  </a>)}</div>
+                </> : <div className="career-empty"><SearchX size={30} /><h3>{jobs.length ? "暂时没有匹配的职位" : "暂时没有开放职位"}</h3><p>{jobs.length ? "试试其他关键词、城市或招聘类型。" : "招聘机会更新后将在这里展示，欢迎之后再来。"}</p>{jobs.length > 0 && <button className="button" onClick={() => { setQuery(""); setCity(""); setType("all"); }}>清除筛选条件</button>}</div>}
+              </div>
+            </section>
+            <section className="career-guide" aria-label="投递指南"><div><h2>从相互了解开始。</h2><p>无需企业账号，投递后即可保存回执。</p></div><ol><li><span>01</span>选择职位</li><li><span>02</span>上传简历</li><li><span>03</span>确认投递</li></ol></section>
           </>
         )}
       </main>
@@ -246,7 +265,7 @@ function ApplicationForm({ job }: { job: PublicJob }) {
     }
   }
   if (receipt) return (
-    <section className="career-application career-receipt" aria-live="polite">
+    <section id="career-application" className="career-application career-receipt" aria-live="polite">
       <span className="career-success-icon"><CheckCircle2 size={32} /></span>
       <Badge tone="green">已投递 · 待 HR 查看</Badge>
       <h2 id="career-receipt-title" tabIndex={-1}>简历已送达。</h2>
