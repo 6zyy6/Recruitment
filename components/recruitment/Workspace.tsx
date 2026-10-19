@@ -239,6 +239,9 @@ export default function Workspace() {
       setPage("overview");
       setJobId("");
       setQuery("");
+      setType("all");
+      setBatch("");
+      setResult("all");
       setToast("已切换演示账号");
     } catch (e) {
       setError(e instanceof Error ? e.message : "登录失败");
@@ -1050,7 +1053,7 @@ export default function Workspace() {
                               <div>
                                 <i
                                   style={{
-                                    width: `${m.total ? Math.max(3, (f.count / m.total) * 100) : 0}%`,
+                                    width: `${m.total && f.count > 0 ? Math.max(3, (f.count / m.total) * 100) : 0}%`,
                                     opacity: 1 - i * 0.1,
                                   }}
                                 />
@@ -1596,7 +1599,7 @@ export default function Workspace() {
                             <div className="funnel-track">
                               <div
                                 style={{
-                                  width: `${m.total ? Math.max(2, (f.count / m.total) * 100) : 0}%`,
+                                  width: `${m.total && f.count > 0 ? Math.max(2, (f.count / m.total) * 100) : 0}%`,
                                 }}
                               />
                             </div>

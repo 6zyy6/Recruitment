@@ -20,11 +20,11 @@
   --color-violet-soft: #f1edfb;
   --color-green: #258164;
   --color-green-soft: #eaf6ef;
-  --color-amber: #b77c27;
+  --color-amber: #8d5b12;
   --color-amber-soft: #fff6e6;
-  --color-teal: #318d91;
+  --color-teal: #216d71;
   --color-teal-soft: #e8f6f6;
-  --color-red: #cf4a57;
+  --color-red: #aa3442;
   --color-red-soft: #fff0f1;
   --color-overlay: #13244356;
   --color-shadow: #233b5712;
@@ -105,6 +105,12 @@ textarea:focus {
   outline: none;
   border-color: var(--primary);
   box-shadow: 0 0 0 3px var(--color-blue-soft);
+}
+input:focus-visible,
+select:focus-visible,
+textarea:focus-visible {
+  outline: 2px solid var(--primary);
+  outline-offset: 2px;
 }
 input::placeholder,
 textarea::placeholder {
