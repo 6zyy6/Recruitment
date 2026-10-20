@@ -32,7 +32,7 @@ import {
   queueResumeReview,
   resumeReviewInput,
 } from "./resume-workflow.ts";
-import { screeningPolicy } from "./selection.ts";
+import { hasLegacyScreeningApproval, screeningPolicy } from "./selection.ts";
 import {
   InterviewInvitationError,
   previewInterviewInvitation,
@@ -277,9 +277,10 @@ export async function recruitmentAction(
       const job = next.jobs.find((item) => item.id === app.jobId)!;
       if (
         input.action === "ensure_resume_review" &&
-        app.selection?.resumeReview?.mode === "llm" &&
-        JSON.stringify(app.selection.resumeReview.policy) ===
-          JSON.stringify(screeningPolicy(job))
+        (hasLegacyScreeningApproval(next, app) ||
+          (app.selection?.resumeReview?.mode === "llm" &&
+            JSON.stringify(app.selection.resumeReview.policy) ===
+              JSON.stringify(screeningPolicy(job))))
       )
         return false;
       queueResumeReview(app, job, new Date().toISOString());

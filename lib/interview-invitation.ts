@@ -6,7 +6,7 @@ import type {
   InterviewInvitationSummary,
   User,
 } from "./domain.ts";
-import { screeningPolicy } from "./selection.ts";
+import { hasLegacyScreeningApproval, screeningPolicy } from "./selection.ts";
 
 const TTL = 7 * 86400000;
 type Input = Record<string, unknown>;
@@ -94,15 +94,13 @@ function invitationContext(state: AppState, user: User, input: Input, clock: Dat
     ?? fail("NOT_FOUND", "职位不存在", 404);
   if (app.status !== "active" || app.stage !== "interview" || interview.status !== "scheduled")
     fail("INVALID_STAGE", "仅有效面试阶段的待进行面试可以发送邀请");
-  if (app.selection) {
+  if (!hasLegacyScreeningApproval(state, app)) {
     const currentPolicy = JSON.stringify(screeningPolicy(job));
-    if (app.selection.hrReview?.conclusion !== "pass" ||
+    if (app.selection?.hrReview?.conclusion !== "pass" ||
       !app.selection.ruleReview?.policy || !app.selection.resumeReview?.policy ||
       JSON.stringify(app.selection.ruleReview.policy) !== currentPolicy ||
       JSON.stringify(app.selection.resumeReview.policy) !== currentPolicy)
       fail("SCREENING_REQUIRED", "请先完成当前岗位规则初筛、简历复筛并由 HR 确认通过");
-  } else if (!str(app.screeningNote)) {
-    fail("SCREENING_REQUIRED", "请先记录 HR 筛选通过依据");
   }
   const candidate = state.candidates.find(item => item.id === app.candidateId)
     ?? fail("NOT_FOUND", "候选人不存在", 404);

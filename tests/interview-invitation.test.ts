@@ -2,6 +2,7 @@ import { test } from "node:test";
 import assert from "node:assert/strict";
 import type { AppState, Interview } from "../lib/domain.ts";
 import { createSeed } from "../lib/seed.ts";
+import { applyAction } from "../lib/engine.ts";
 import { runResumeReview, runRuleReview } from "../lib/selection.ts";
 import {
   InterviewInvitationError,
@@ -139,6 +140,33 @@ test("new selection reports require current policy plus explicit HR pass; legacy
   const changed = structuredClone(state), job = changed.jobs.find(item => item.id === changed.applications[0].jobId)!;
   job.screeningPolicy!.updatedAt = "2026-10-20T08:00:01.000Z";
   rejects(() => invite(changed), "SCREENING_REQUIRED");
+});
+
+test("historical interview approvals survive demo reports, assessments and automatic resume requests", () => {
+  for (const applicationId of ["application_17", "application_18"]) {
+    let state = createSeed(NOW);
+    const interview = state.interviews.find(item => item.applicationId === applicationId && item.status === "scheduled")!;
+    Object.assign(interview, { start: "2026-10-21T09:00:00.000Z", end: "2026-10-21T10:00:00.000Z" });
+    state.interviews = [interview];
+    const before = JSON.stringify(state);
+    assert.match(previewInterviewInvitation(state, hr(state), input(state), NOW).subject, /面试邀请/);
+    assert.equal(invite(state).invitation.delivery, "pending");
+    assert.equal(JSON.stringify(state), before);
+
+    const selection = structuredClone(state.applications.find(item => item.id === applicationId)!.selection);
+    state = applyAction(state, hr(state), { action: "ensure_resume_review", applicationId, expectedRevision: state.revision }, NOW);
+    assert.deepEqual(state.applications.find(item => item.id === applicationId)!.selection, selection);
+    assert.equal(invite(state).invitation.delivery, "pending");
+
+    state = applyAction(state, hr(state), { action: "run_screening", applicationId, expectedRevision: state.revision }, NOW);
+    rejects(() => invite(state), "SCREENING_REQUIRED");
+  }
+});
+
+test("historical screening compatibility still rejects past interview schedules", () => {
+  const state = createSeed(NOW);
+  state.interviews = [state.interviews.find(item => item.applicationId === "application_17" && item.status === "scheduled")!];
+  rejects(() => invite(state), "INVALID_SCHEDULE");
 });
 
 test("email, future schedule, duration, location and valid interviewers are required", () => {

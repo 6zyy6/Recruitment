@@ -13,6 +13,7 @@ import { safeMeetingUrl } from "./interview.ts";
 import { CandidateReviewError, revokeCandidateReview } from "./candidate-review.ts";
 import {
   handleSelectionAction,
+  hasLegacyScreeningApproval,
   runRuleReview,
   screeningPolicy,
   SelectionError,
@@ -488,16 +489,16 @@ export function applyAction(
     };
   };
   const screeningApproved = (app: Application) => {
-    if (!app.selection) return;
+    if (hasLegacyScreeningApproval(state, app)) return;
     if (
-      app.selection.hrReview?.conclusion !== "pass" ||
+      app.selection?.hrReview?.conclusion !== "pass" ||
       !app.selection.ruleReview ||
       !app.selection.resumeReview
     )
       fail("SCREENING_APPROVAL_REQUIRED", "请先完成初筛、复筛并由 HR 确认通过");
     const policy = JSON.stringify(screeningPolicy(jobById(app.jobId)));
     if (
-      [app.selection.ruleReview, app.selection.resumeReview].some(
+      [app.selection?.ruleReview, app.selection?.resumeReview].some(
         (report) => !report?.policy || JSON.stringify(report.policy) !== policy,
       )
     )

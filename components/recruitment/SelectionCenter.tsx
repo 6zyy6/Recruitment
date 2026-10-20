@@ -283,6 +283,7 @@ function SelectionWorkspace({
     if (
       !actionable ||
       !application ||
+      !["new", "screening"].includes(application.stage) ||
       application.snapshot.restricted ||
       application.source === "个人信息已清理" ||
       application.snapshot.resume === "个人信息已清理" ||

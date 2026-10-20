@@ -77,6 +77,25 @@ export function screeningPolicy(job: Job): ScreeningPolicy {
     },
   );
 }
+export function hasLegacyScreeningApproval(state: AppState, app: Application): boolean {
+  if (!app.screeningNote.trim() || app.selection?.hrReview) return false;
+  const events = state.events.filter((item) => item.applicationId === app.id);
+  if ((app.selection && !events.some((item) => item.type === "advanced" && item.from === "screening" && item.to === "interview")) ||
+    events.some((item) => ["run_screening", "review_resume", "verify_screening_info", "confirm_screening", "configure_screening"].includes(item.type)))
+    return false;
+  const job = state.jobs.find((item) => item.id === app.jobId);
+  if (!job) return false;
+  const policy = JSON.stringify(screeningPolicy(job));
+  if ([app.selection?.ruleReview, app.selection?.resumeReview].some(
+    (report) => report && (!report.policy || JSON.stringify(report.policy) !== policy),
+  )) return false;
+  return !state.reviews?.some((review) =>
+    review.applicationId === app.id && review.status === "submitted" && review.submittedFields &&
+    Object.entries(review.fields).some(([key, value]) =>
+      JSON.stringify(value) !== JSON.stringify(review.submittedFields![key as keyof typeof review.fields]),
+    ),
+  );
+}
 function excerpt(source: string, token: string): string {
   const index = source.toLocaleLowerCase().indexOf(token.toLocaleLowerCase());
   return index < 0
@@ -660,6 +679,7 @@ export function handleSelectionAction(
   if (!["new", "screening", "interview"].includes(app.stage))
     fail("SELECTION_STAGE", "进入 Offer 后仅可查看历史甄选报告");
   const job = jobById(app.jobId);
+  if (action === "ensure_resume_review" && hasLegacyScreeningApproval(state, app)) return true;
   app.selection ??= { assessments: [] };
   app.selection.assessments ??= [];
   const currentPolicy = screeningPolicy(job);
