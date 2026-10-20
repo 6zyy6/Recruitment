@@ -9,8 +9,9 @@
 - 页面显式提交 `sendEmail: true` 才真实发送。只有 Gmail 返回消息 ID 后才显示“Gmail 已接受发送”；这不代表送达或已读。
 - `sending`、`unknown` 不自动重发。先核对 Gmail 已发送邮件；若要重新邀请，明确撤销旧链接后再发新邀请，旧链接失效。
 - 站点托管受众已为 public。live 模式下管理首页与全部招聘 API 限允许的真实 ChatGPT 账号；候选人凭七天链接仅访问本次投递白名单字段，不需要 HR 演示账号。
-- Google Cloud 已创建 `TalentFlow Recruitment` 项目和 `TalentFlow Recruitment Web` 客户端；Gmail API 已启用，声明范围已保存为 `gmail.send`、`openid` 与 `userinfo.email`，发件人已加入测试用户。首次服务条款与 API 数据政策由用户亲自完成。六项网站配置已写入 Sites 服务端，环境修订 1，密钥均标 secret，临时传递文件已删除。发信邮箱授权及真实收信验收仍在进行；代码或 mock 测试通过不能替代实际外部发送验收。
-- 邮件代码及回归测试已稳定，可随共享目录的集成发布流程统一发布；新环境配置需随部署生效，随后在 `/mail-connect` 连接 Gmail。尚未进行真实发送，不可单独以已上线真实发信宣告完成。
+- Google Cloud 已创建 `TalentFlow Recruitment` 项目和 `TalentFlow Recruitment Web` 客户端；Gmail API 已启用，声明范围已保存为 `gmail.send`、`openid` 与 `userinfo.email`，发件人已加入测试用户。首次服务条款与 API 数据政策由用户亲自完成。六项网站配置已写入 Sites 服务端并随当前环境修订 2 生效，密钥均标 secret，临时传递文件已删除。
+- v8 修复 Workers 不支持 `redirect: "error"` 的兼容问题：四条 Google 请求使用 `manual` 且不跟随跳转；send 3xx 保持 unknown、不自动重发。新增实际 Miniflare 回归后，全量 220/220、类型与正式构建通过。
+- 正式 `/mail-connect` 已通过真实所有者登录及 Google OAuth，发件身份核对成功。已按用户授权向本人发送一封合成核对邮件，并在本人 Gmail 的 INBOX/SENT 实际查收；核对提交与 HR 回写的最终结果见 [VERIFICATION.md](../VERIFICATION.md)。该单次真实验收不代表所有收件服务、额度或送达情况均已验证。
 
 ## 服务端配置
 

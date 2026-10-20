@@ -1,6 +1,6 @@
 # 业务规则与验证映射
 
-本文映射核心、careers、Gmail、会议/邀请及DeepSeek测试。`existing`表示检查已存在，最终数量与结果只看VERIFICATION；历史数字不代替共享冻结版结论。模型模块单独真实调用也不等于整站E2E，邮件尚无真实发信结论。
+本文映射核心、careers、Gmail、会议/邀请及DeepSeek测试。`existing`表示检查已存在，最终数量与结果只看VERIFICATION；历史数字不代替共享冻结版结论。模型模块单独真实调用也不等于整站E2E；v8已有本人单封真实收信、匿名核对及HR回写记录，邮件外部闭环的逐项结果只看VERIFICATION，不能由mock替代。
 
 依据来自 [architecture.md](./architecture.md)、[flows.md](./flows.md)、[permissions.md](./permissions.md)、[variables.md](./variables.md)、[automation.md](./automation.md) 与 [GMAIL-INTEGRATION.md](./GMAIL-INTEGRATION.md)。历史核心补强曾通过82项及typecheck，HTTP主流程18/18（`mvfk3clq`）、甄选13/13（`mvfk86m0`）、核对10/10（`mvfk3ew2`）共41组；这些是新增真实模型/Gmail集成前的版本证据。最终全量数量、失败修复、构建和部署事实只在 [VERIFICATION.md](../VERIFICATION.md) 归档，不用历史数字描述当前全量通过。
 
@@ -61,7 +61,7 @@
 | 状态容量 → 有界持久化 | 达 1,900,000 字节上限拒绝且旧 revision/payload 不变；边界内可保存 | variables；`server.ts#saveState` | 自动化集成 | proposed |
 | PDF/DOCX 浏览器解析 → 成功及异常分支 | 文字 PDF/DOCX 正确，扫描/加密/20 页以上/超时拒绝；解析无外部上传；重复上传替换需明确操作 | flows §3；`resume-file.ts`、`CandidateIntake.tsx`；既有人工验收记录 | 自动化浏览器集成；解析对照人工复核 | proposed |
 | public 核对入口 → 实际受众 | 干净浏览器不登录应用也可凭有效 token 核对；无 token 无资料；提交后锁定；noindex/referrer 与缓存头正确 | architecture 公开路由；flows §4；核对页面及 API | 受控线上合成测试 | proposed |
-| 真实Gmail → OAuth/收信闭环 | 允许Sites操作者完成Google授权；明确发送合成邀请；Gmail消息ID/收件人访问提交/HR回填分别核对；错误/unknown不假报送达 | flows §4/§9；GMAIL-INTEGRATION；服务端和UI | 受控线上 + 人工收信复核，按用户已授权测试范围 | proposed，mock不能替代 |
+| 真实Gmail → OAuth/收信闭环 | 允许Sites操作者完成Google授权；明确发送合成邀请；Gmail消息ID/收件人访问提交/HR回填分别核对；错误/unknown不假报送达 | flows §4/§9；GMAIL-INTEGRATION；服务端和UI | 受控线上 + 人工收信复核，按用户已授权测试范围 | v8 单次人工真实闭环已通过；固定可重复外部回归仍 proposed，mock不能替代 |
 | 真实模型整站 → 权限/保存/报告与效果 | 单独模块调用已取证；仍需整站HR入口真实请求、逐字证据回写/展示、匿名careers不付费、非HR拒绝；不以模块请求替代全部E2E | automation；server、resume-ai、careers | 受控整站集成 + 岗位相关人工评估 | proposed；模块证据及最终结果分别记VERIFICATION |
 | 真实面试邮件 → 外部闭环 | 核对候选人当前主档收件邮箱、会议资料与真实消息ID；外部打开确认/改期申请，HR回写；已实现的模板/幂等mock不能代替收信 | flows §10；[interview-invitations.md](./interview-invitations.md) | 受控线上合成投递 + 人工收信/浏览器复核 | proposed；已有单测/本地HTTP另列existing |
 | Gmail备用草稿 → 不混淆回执 | 预览正确；打开草稿不写sent；unknown/sending先核对发件箱，不能诱发重复邮件 | flows §4；两个邀请组件 | 人工复核/浏览器集成 | proposed |
