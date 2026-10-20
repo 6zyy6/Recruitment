@@ -95,12 +95,16 @@ function fixture(env: GmailEnvironment = ENV) {
     refreshFails: false,
     revokeFails: false,
     beforeIdentity: undefined as (() => Promise<void>) | undefined,
+    tokenResponse: undefined as (() => Promise<Response>) | undefined,
+    identityResponse: undefined as (() => Promise<Response>) | undefined,
+    revokeResponse: undefined as (() => Promise<Response>) | undefined,
     send: async () => Response.json({ id: "gmail-message-one" }),
   };
   const fetcher: typeof fetch = async (input, init) => {
     const url = String(input);
     calls.push({ url, init });
     if (url === "https://oauth2.googleapis.com/token") {
+      if (provider.tokenResponse) return provider.tokenResponse();
       const params = new URLSearchParams(String(init?.body));
       if (params.get("grant_type") === "refresh_token" && provider.refreshFails)
         return Response.json(
@@ -117,14 +121,17 @@ function fixture(env: GmailEnvironment = ENV) {
       });
     }
     if (url === "https://www.googleapis.com/oauth2/v3/userinfo") {
+      if (provider.identityResponse) return provider.identityResponse();
       if (provider.beforeIdentity) await provider.beforeIdentity();
       return Response.json({
         email: SENDER,
         email_verified: provider.verified,
       });
     }
-    if (url === "https://oauth2.googleapis.com/revoke")
+    if (url === "https://oauth2.googleapis.com/revoke") {
+      if (provider.revokeResponse) return provider.revokeResponse();
       return new Response(null, { status: provider.revokeFails ? 503 : 200 });
+    }
     if (url === "https://gmail.googleapis.com/gmail/v1/users/me/messages/send")
       return provider.send();
     throw new Error(
@@ -826,4 +833,161 @@ test("Gmail action bodies reject malformed UTF-8, JSON primitives and arrays", a
       (error) => error instanceof GmailError && error.code === "MAIL_REQUEST",
     );
   }
+});
+
+test("actual Gmail request options work in Workers and never forward credentials on redirects", async () => {
+  const f = fixture();
+  await f.connect();
+  await f.service.send(request(), MAIL);
+  await f.service.action(request(), { action: "disconnect" });
+  const { Miniflare, Response: WorkerResponse } = await import("miniflare");
+  const outgoing: string[] = [];
+  const runtime = new Miniflare({
+    modules: true,
+    compatibilityDate: "2026-05-15",
+    script: `export default { async fetch(request) {
+      const results = [];
+      for (const {url, init} of await request.json()) {
+        try {
+          const response = await fetch(url, {...init, signal: AbortSignal.timeout(1000)});
+          results.push({status: response.status, redirected: response.redirected});
+        } catch { results.push({status: 0}); }
+      }
+      return Response.json(results);
+    }};`,
+    outboundService: (request) => {
+      outgoing.push(request.url);
+      return new WorkerResponse(null, {
+        status: 307,
+        headers: { location: "https://untrusted.invalid/capture" },
+      });
+    },
+  });
+  try {
+    // Reuse actual service-generated method, headers and body; only synthetic credentials exist here.
+    const calls = f.calls.map(({ url, init }) => ({
+      url,
+      init: {
+        method: init?.method,
+        redirect: init?.redirect,
+        headers: Object.fromEntries(new Headers(init?.headers)),
+        ...(init?.body ? { body: String(init.body) } : {}),
+      },
+    }));
+    const response = await runtime.dispatchFetch(
+      "https://internal.invalid/probe",
+      { method: "POST", body: JSON.stringify(calls) },
+    );
+    const results = (await response.json()) as {
+      status: number;
+      redirected?: boolean;
+    }[];
+    assert.equal(results.length, 5);
+    assert.ok(
+      results.every(
+        (result) => result.status === 307 && result.redirected === false,
+      ),
+    );
+    assert.equal(outgoing.length, calls.length);
+    assert.ok(
+      outgoing.every((url) => new URL(url).hostname !== "untrusted.invalid"),
+    );
+  } finally {
+    await runtime.dispose();
+  }
+});
+
+test("OAuth token failures expose only fixed timeout, transport, response and redirect codes", async () => {
+  const cases = [
+    {
+      code: "MAIL_TOKEN_TIMEOUT",
+      response: async () => {
+        throw new DOMException("SYNTHETIC_SECRET_CODE_TOKEN", "TimeoutError");
+      },
+    },
+    {
+      code: "MAIL_TOKEN_TRANSPORT",
+      response: async () => {
+        throw new TypeError("SYNTHETIC_SECRET_CODE_TOKEN");
+      },
+    },
+    {
+      code: "MAIL_TOKEN_RESPONSE",
+      response: async () =>
+        new Response("SYNTHETIC_SECRET_CODE_TOKEN", { status: 502 }),
+    },
+    { code: "MAIL_TOKEN_RESPONSE", response: async () => Response.json(null) },
+    {
+      code: "MAIL_TOKEN_TIMEOUT",
+      response: async () =>
+        new Response(
+          new ReadableStream({
+            start(controller) {
+              controller.error(
+                new DOMException("SYNTHETIC_SECRET_CODE_TOKEN", "TimeoutError"),
+              );
+            },
+          }),
+        ),
+    },
+    {
+      code: "MAIL_TOKEN_REDIRECT",
+      response: async () =>
+        new Response("SYNTHETIC_SECRET_CODE_TOKEN", {
+          status: 307,
+          headers: {
+            location: "https://untrusted.invalid/SYNTHETIC_SECRET_CODE_TOKEN",
+          },
+        }),
+    },
+  ];
+  for (const item of cases) {
+    const f = fixture();
+    const start = await f.begin();
+    f.provider.tokenResponse = item.response;
+    const response = await f.service.callback(f.callback(start));
+    const location = response.headers.get("location")!;
+    assert.equal(new URL(location).searchParams.get("code"), item.code);
+    assert.ok(!location.includes("SYNTHETIC_SECRET_CODE_TOKEN"));
+    assert.ok(!location.includes(ENV.GMAIL_CLIENT_SECRET!));
+    assert.equal(await response.text(), "");
+    assert.equal(f.calls.length, 1);
+    assert.equal((await f.service.status(request())).connected, false);
+  }
+});
+
+test("userinfo and revoke redirects stop locally; send remains unknown without retry or leaked diagnostics", async () => {
+  const redirect = async () =>
+    new Response("SYNTHETIC_SECRET_CODE_TOKEN", {
+      status: 307,
+      headers: {
+        location: "https://untrusted.invalid/SYNTHETIC_SECRET_CODE_TOKEN",
+      },
+    });
+  const identity = fixture();
+  const start = await identity.begin();
+  identity.provider.identityResponse = redirect;
+  const callback = await identity.service.callback(identity.callback(start));
+  assert.equal(
+    new URL(callback.headers.get("location")!).searchParams.get("code"),
+    "MAIL_IDENTITY",
+  );
+  assert.equal(identity.calls.length, 2);
+  const f = fixture();
+  await f.connect();
+  f.provider.send = redirect;
+  const result = await f.service.send(request(), MAIL);
+  assert.equal(result.status, "unknown");
+  assert.match(result.reason, /重定向/);
+  assert.ok(!JSON.stringify(result).includes("SYNTHETIC_SECRET_CODE_TOKEN"));
+  assert.deepEqual(await f.service.send(request(), MAIL), result);
+  assert.equal(f.sendCount(), 1);
+  f.provider.revokeResponse = redirect;
+  const response = await f.service.action(request(), { action: "disconnect" });
+  const body = await response.text();
+  assert.match(body, /撤销未能确认/);
+  assert.ok(!body.includes("SYNTHETIC_SECRET_CODE_TOKEN"));
+  assert.ok(
+    f.calls.every((call) => new URL(call.url).hostname !== "untrusted.invalid"),
+  );
 });

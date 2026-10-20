@@ -1,5 +1,16 @@
 # Demo 验证记录
 
+## Gmail Workers 兼容修复 2026-10-20
+
+用户已完成真实 Sites 所有者登录及 Google 本人验证，并明确批准 Gmail 发信权限和向本人邮箱发送一封合成测试邮件。v7 的回调已通过 state 校验，但交换令牌返回 `MAIL_TOKEN_FAILED`；截至此修复发布前，邮箱仍未连接、真实发信为 0。
+
+- 已在本地 workerd 复现：`redirect: "error"` 在构造请求时抛出 TypeError，尚未发出网络请求。与 [Cloudflare Request 官方说明](https://developers.cloudflare.com/workers/runtime-apis/request/#properties) 一致；不能据此归因为 Google 凭据错误。
+- 仅修改 `lib/gmail.ts` 与对应测试：token、userinfo、send、revoke 四条请求改用 `manual`。token/userinfo 拒绝 3xx、不保存连接；revoke 保留本地断开与远端撤销未确认的区别；send 3xx 保持 `unknown`，相同邀请不自动重发，仍只有 2xx 及有效邮件 ID 才记为 `sent`。不跟随 Location，不扩大授权范围。
+- 令牌请求拆为固定的超时、传输、响应与重定向错误码；不记录 OAuth code、secret、token、原始异常、响应正文或敏感请求头。
+- 新增 3 项回归先在旧代码全部失败，修复后 Gmail **25/25**；最终全量 `npm test` **220/220、0 跳过**，TypeScript 与官方 Sites 1.1 构建通过，定向 ESLint 通过。独立代码审查无阻断。既有全仓 lint 限制不变。
+- 实际 Miniflare 回归捕获服务生成的五次 RequestInit（授权 token、userinfo、刷新 token、send、revoke），本地目标均返回 307；没有请求 Location、没有外网或真实凭据，发送状态为 unknown 且重复请求不再发送。该运行时检查补齐了原 Node 模拟测试未覆盖的 Workers 差异。
+- 此次不重复付费模型 HTTP 检查；先前五组记录仍按其运行版本保留。真实 Google 回调、发信、收信及候选人提交回写需在修复部署后继续验证，不能用上述模拟结果宣称邮箱已接通。实际统一版本与提交记录在 `outputs/unified-release.json`。
+
 ## 统一集成最终验收 2026-10-20
 
 本节覆盖六个核心模块及本轮合并的公开投递、宽进初筛、真实 DeepSeek、Gmail OAuth、会议与面试邀请。以下历史章节仅表示当时版本，不能替代本节结果。

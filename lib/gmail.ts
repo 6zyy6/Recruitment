@@ -394,7 +394,7 @@ export function createGmailService(options: ServiceOptions) {
     try {
       response = await fetcher("https://oauth2.googleapis.com/token", {
         method: "POST",
-        redirect: "error",
+        redirect: "manual",
         signal: AbortSignal.timeout(12000),
         headers: { "content-type": "application/x-www-form-urlencoded" },
         body: new URLSearchParams({
@@ -403,20 +403,37 @@ export function createGmailService(options: ServiceOptions) {
           ...values,
         }),
       });
-    } catch {
+    } catch (error) {
+      const timeout =
+        error instanceof DOMException && error.name === "TimeoutError";
       return fail(
-        "MAIL_TOKEN_FAILED",
-        "无法连接 Google 授权服务，邮件尚未发送",
+        timeout ? "MAIL_TOKEN_TIMEOUT" : "MAIL_TOKEN_TRANSPORT",
+        timeout
+          ? "连接 Google 授权服务超时，请重新连接 Gmail"
+          : "无法连接 Google 授权服务，邮件尚未发送",
         503,
       );
     }
+    if (response.status >= 300 && response.status < 400)
+      fail(
+        "MAIL_TOKEN_REDIRECT",
+        "Google 授权服务返回重定向，已停止请求，请重新连接 Gmail",
+        503,
+      );
     let body: Record<string, unknown>;
     try {
-      body = (await response.json()) as Record<string, unknown>;
-    } catch {
+      const parsed: unknown = await response.json();
+      if (!parsed || typeof parsed !== "object" || Array.isArray(parsed))
+        throw new Error();
+      body = parsed as Record<string, unknown>;
+    } catch (error) {
+      const timeout =
+        error instanceof DOMException && error.name === "TimeoutError";
       return fail(
-        "MAIL_TOKEN_FAILED",
-        "Google 授权响应无效，请稍后重新连接 Gmail",
+        timeout ? "MAIL_TOKEN_TIMEOUT" : "MAIL_TOKEN_RESPONSE",
+        timeout
+          ? "读取 Google 授权响应超时，请重新连接 Gmail"
+          : "Google 授权响应无效，请稍后重新连接 Gmail",
         503,
       );
     }
@@ -582,7 +599,7 @@ export function createGmailService(options: ServiceOptions) {
             "https://oauth2.googleapis.com/revoke",
             {
               method: "POST",
-              redirect: "error",
+              redirect: "manual",
               signal: AbortSignal.timeout(12000),
               headers: { "content-type": "application/x-www-form-urlencoded" },
               body: new URLSearchParams({ token }),
@@ -673,7 +690,7 @@ export function createGmailService(options: ServiceOptions) {
       const response = await fetcher(
         "https://www.googleapis.com/oauth2/v3/userinfo",
         {
-          redirect: "error",
+          redirect: "manual",
           signal: AbortSignal.timeout(12000),
           headers: { authorization: `Bearer ${granted.access_token}` },
         },
@@ -886,7 +903,7 @@ export function createGmailService(options: ServiceOptions) {
         "https://gmail.googleapis.com/gmail/v1/users/me/messages/send",
         {
           method: "POST",
-          redirect: "error",
+          redirect: "manual",
           signal: AbortSignal.timeout(12000),
           headers: {
             authorization: `Bearer ${renewed.access_token}`,
@@ -896,14 +913,17 @@ export function createGmailService(options: ServiceOptions) {
         },
       );
       if (!response.ok) {
-        const unknown = response.status >= 500;
+        const redirected = response.status >= 300 && response.status < 400;
+        const unknown = redirected || response.status >= 500;
         return await saveDelivery(mail.id, {
           status: unknown ? "unknown" : "failed",
-          reason: unknown
-            ? "Gmail 返回服务器错误，发送结果无法确认；请核对已发送邮件，系统不会自动重发。"
-            : response.status === 429
-              ? "Gmail 发送额度或速率受限，本次请求被拒绝；请稍后核对后重新生成邀请。"
-              : "Gmail 拒绝了发送请求，请检查邮箱权限或授权后重新生成邀请。",
+          reason: redirected
+            ? "Gmail返回重定向，未继续请求；发送结果无法确认，请核对已发送邮件，系统不会自动重发。"
+            : unknown
+              ? "Gmail 返回服务器错误，发送结果无法确认；请核对已发送邮件，系统不会自动重发。"
+              : response.status === 429
+                ? "Gmail 发送额度或速率受限，本次请求被拒绝；请稍后核对后重新生成邀请。"
+                : "Gmail 拒绝了发送请求，请检查邮箱权限或授权后重新生成邀请。",
         });
       }
       const body = (await response.json()) as { id?: unknown };
