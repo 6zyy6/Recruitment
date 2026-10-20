@@ -520,8 +520,8 @@ export default function CandidateIntake({
                       )}
                   </div>
                   <p className="intake-gmail-note">
-                    最后在 Gmail
-                    确认发送；系统不会将打开草稿计为已发送。核对链接仅用于合成资料演示，请勿转发或填写真实个人资料。
+                    发送状态以上方记录为准；如需核实，请查看 Gmail
+                    已发送邮件。核对链接仅用于本次投递，请勿转发或填写真实个人资料。
                   </p>
                 </>
               ) : (

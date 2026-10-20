@@ -1,0 +1,54 @@
+{
+  "site": "https://talentflow-recruiting-demo.swoonytune34.chatgpt.site",
+  "codeCommit": "5d7dcfe211d6f683731b274213f76a998a98c0ec",
+  "environmentRevision": 2,
+  "verifiedAtUTC": "2026-10-20 00:09:42 UTC",
+  "timeZone": "Asia/Shanghai",
+  "syntheticCandidate": "邮箱联调测试",
+  "jobTitle": "高级产品经理",
+  "connected": true,
+  "senderIdentityVerified": true,
+  "emailsSent": 1,
+  "mailJobStatus": "sent",
+  "sentAtUTC": "2026-10-20T00:04:05.569Z",
+  "providerMessageMatchesReceivedMessage": true,
+  "receivedLabels": [
+    "SENT",
+    "INBOX"
+  ],
+  "anonymousRead": {
+    "httpStatus": 200,
+    "cookieUsed": false,
+    "hrIdentityUsed": false,
+    "fieldCount": 9
+  },
+  "anonymousSubmit": {
+    "httpStatus": 200,
+    "cookieUsed": false,
+    "hrIdentityUsed": false,
+    "changedField": "availability",
+    "before": "两周内",
+    "after": "三周内（邮件闭环测试）"
+  },
+  "usedLinkRevisit": {
+    "httpStatus": 410,
+    "error": "REVIEW_GONE"
+  },
+  "hrReadback": {
+    "candidateConfirmed": true,
+    "availability": "三周内（邮件闭环测试）",
+    "stage": "新投递",
+    "auditRecorded": true,
+    "updatedAiReviewCompleted": true
+  },
+  "limits": [
+    "本例为单次投递；未在生产新增多投递隔离对照。",
+    "本例没有既有HR或经理录用结论；旧结论失效由既有回归覆盖。"
+  ],
+  "privateValuesOmitted": [
+    "email",
+    "candidate_review_token",
+    "OAuth code and tokens",
+    "Gmail message ID"
+  ]
+}

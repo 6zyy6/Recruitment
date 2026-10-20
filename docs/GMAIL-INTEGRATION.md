@@ -11,7 +11,8 @@
 - 站点托管受众已为 public。live 模式下管理首页与全部招聘 API 限允许的真实 ChatGPT 账号；候选人凭七天链接仅访问本次投递白名单字段，不需要 HR 演示账号。
 - Google Cloud 已创建 `TalentFlow Recruitment` 项目和 `TalentFlow Recruitment Web` 客户端；Gmail API 已启用，声明范围已保存为 `gmail.send`、`openid` 与 `userinfo.email`，发件人已加入测试用户。首次服务条款与 API 数据政策由用户亲自完成。六项网站配置已写入 Sites 服务端并随当前环境修订 2 生效，密钥均标 secret，临时传递文件已删除。
 - v8 修复 Workers 不支持 `redirect: "error"` 的兼容问题：四条 Google 请求使用 `manual` 且不跟随跳转；send 3xx 保持 unknown、不自动重发。新增实际 Miniflare 回归后，全量 220/220、类型与正式构建通过。
-- 正式 `/mail-connect` 已通过真实所有者登录及 Google OAuth，发件身份核对成功。已按用户授权向本人发送一封合成核对邮件，并在本人 Gmail 的 INBOX/SENT 实际查收；核对提交与 HR 回写的最终结果见 [VERIFICATION.md](../VERIFICATION.md)。该单次真实验收不代表所有收件服务、额度或送达情况均已验证。
+- 正式 `/mail-connect` 已通过真实所有者登录及 Google OAuth，发件身份核对成功。已按用户授权向本人发送一封合成核对邮件，在本人 Gmail 的 INBOX/SENT 实际查收，并完成匿名资料更正、链接锁定与 HR 回写。结果见 [VERIFICATION.md](../VERIFICATION.md) 与 [脱敏机器证据](./evidence/gmail-live-acceptance.json)。该单次真实验收不代表所有收件服务、额度或送达情况均已验证。
+- OAuth 应用处于 External / Testing 且包含 Gmail 权限时，Google 签发的 refresh token 有效期为 7 天，届时需要重新连接；仅基本身份范围的例外不适用于本应用的 `gmail.send`。见 [Google 官方有效期说明](https://developers.google.com/identity/protocols/oauth2/#expiration)。
 
 ## 服务端配置
 
