@@ -148,6 +148,10 @@ export default function Workspace() {
     [toast, setToast] = useState("");
   const [reviewingAppId, setReviewingAppId] = useState("");
   const attemptedReviews = useRef(new Set<string>());
+  const sessionEpoch = useRef(0);
+  const changingSession = useRef(false);
+  // A render during switching still contains the previous user's children.
+  const renderEpoch = changingSession.current ? -1 : sessionEpoch.current;
   const [page, setPage] = useState<Page>("overview"),
     [type, setType] = useState<"all" | "social" | "campus">("all"),
     [query, setQuery] = useState(""),
@@ -181,31 +185,50 @@ export default function Workspace() {
     if (!response.ok) throw new Error(data.message || "请求失败，请重试");
     return data;
   }
+  function currentSession(epoch = renderEpoch) {
+    return epoch === sessionEpoch.current && !changingSession.current;
+  }
+  function receiveSnapshot(next: Snapshot, epoch = renderEpoch, userId = snapshot?.user.id) {
+    if (!currentSession(epoch) || (userId && next.user.id !== userId)) return false;
+    setSnapshot((current) => {
+      if (!currentSession(epoch)) return current;
+      if (current?.user.id === next.user.id && current.state.revision > next.state.revision)
+        return current;
+      return next;
+    });
+    return true;
+  }
   async function refresh() {
+    if (!currentSession()) return false;
     setError("");
     try {
-      setSnapshot(await request<Snapshot>("/api/recruitment"));
-      return true;
+      return receiveSnapshot(await request<Snapshot>("/api/recruitment"));
     } catch (e) {
-      setError(e instanceof Error ? e.message : "加载失败");
+      if (currentSession()) setError(e instanceof Error ? e.message : "加载失败");
       return false;
     }
   }
-  useEffect(() => {
-    (async () => {
-      try {
-        const session = await request<{ user: User | null; users: User[] }>(
-          "/api/session",
-        );
-        setAccounts(session.users || []);
-        if (session.user)
-          setSnapshot(await request<Snapshot>("/api/recruitment"));
-      } catch (e) {
-        setError(e instanceof Error ? e.message : "加载失败");
-      } finally {
-        setLoading(false);
+  const loadInitialSession = useEffectEvent(async (epoch: number, active: () => boolean) => {
+    try {
+      const session = await request<{ user: User | null; users: User[] }>(
+        "/api/session",
+      );
+      if (!active() || !currentSession(epoch)) return;
+      setAccounts(session.users || []);
+      if (session.user) {
+        const next = await request<Snapshot>("/api/recruitment");
+        if (active()) receiveSnapshot(next, epoch, session.user.id);
       }
-    })();
+    } catch (e) {
+      if (active() && currentSession(epoch)) setError(e instanceof Error ? e.message : "加载失败");
+    } finally {
+      if (active() && currentSession(epoch)) setLoading(false);
+    }
+  });
+  useEffect(() => {
+    let active = true;
+    void loadInitialSession(sessionEpoch.current, () => active);
+    return () => { active = false; };
   }, []);
   useEffect(() => {
     if (!selected) return;
@@ -247,11 +270,19 @@ export default function Workspace() {
     }
   }, [toast]);
   async function login(userId: string) {
+    if (changingSession.current) return;
+    const epoch = ++sessionEpoch.current;
+    changingSession.current = true;
     setBusy(true);
     setError("");
     try {
       await request("/api/session", { userId, password: "Demo2026!" });
-      setSnapshot(await request<Snapshot>("/api/recruitment"));
+      setSnapshot(null);
+      setModal(null);
+      setQuick(null);
+      const next = await request<Snapshot>("/api/recruitment");
+      changingSession.current = false;
+      if (!receiveSnapshot(next, epoch, userId)) throw new Error("登录身份已更新，请重新登录");
       setSelected("");
       setPage("overview");
       setJobId("");
@@ -263,13 +294,39 @@ export default function Workspace() {
       setSelectionAppId("");
       setToast("已切换演示账号");
     } catch (e) {
+      setSnapshot(null);
       setError(e instanceof Error ? e.message : "登录失败");
     } finally {
+      changingSession.current = false;
+      setLoading(false);
+      setBusy(false);
+    }
+  }
+  async function logout() {
+    if (changingSession.current) return;
+    ++sessionEpoch.current;
+    changingSession.current = true;
+    setBusy(true);
+    setError("");
+    try {
+      const response = await fetch("/api/session", { method: "DELETE" });
+      if (!response.ok) {
+        const data = await response.json().catch(() => null) as { message?: string } | null;
+        throw new Error(data?.message || "退出失败，请重试");
+      }
+      setSnapshot(null);
+      setSelected("");
+      setModal(null);
+      setQuick(null);
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "退出失败，请检查连接后重试");
+    } finally {
+      changingSession.current = false;
       setBusy(false);
     }
   }
   async function action(name: string, fields: Record<string, unknown> = {}) {
-    if (!snapshot) throw new Error("请先登录");
+    if (!snapshot || !currentSession()) throw new Error("请先登录后重新操作");
     const response = await fetch("/api/recruitment", {
       method: "POST",
       headers: { "content-type": "application/json" },
@@ -280,11 +337,12 @@ export default function Workspace() {
       }),
     });
     const data = (await response.json()) as Snapshot & { message?: string };
+    if (!currentSession()) throw new Error("登录身份已更新，请重新操作");
     if (!response.ok) {
       if (response.status === 409) await refresh();
       throw new Error(data.message || "操作未完成");
     }
-    setSnapshot(data);
+    if (!receiveSnapshot(data)) throw new Error("登录身份已更新，请重新操作");
     if (name !== "ensure_resume_review") setToast("已保存，流程记录已更新");
     return data as Snapshot;
   }
@@ -293,9 +351,9 @@ export default function Workspace() {
     try {
       await action(name, fields);
     } catch (e) {
-      setToast(e instanceof Error ? e.message : "操作失败");
+      if (currentSession()) setToast(e instanceof Error ? e.message : "操作失败");
     } finally {
-      setBusy(false);
+      if (currentSession()) setBusy(false);
     }
   }
   function openApp(id: string) {
@@ -736,7 +794,7 @@ export default function Workspace() {
                     app.status === "active" &&
                     app.stage === "interview"
                   }
-                  onSnapshot={setSnapshot}
+                  onSnapshot={receiveSnapshot}
                   onRefresh={refresh}
                 />
               </div>
@@ -2142,10 +2200,8 @@ export default function Workspace() {
                         )}
                         <button
                           className="button"
-                          onClick={async () => {
-                            await fetch("/api/session", { method: "DELETE" });
-                            setSnapshot(null);
-                          }}
+                          disabled={busy}
+                          onClick={logout}
                         >
                           <LogOut size={15} />
                           退出演示账号
@@ -2239,7 +2295,7 @@ export default function Workspace() {
                       key={activeApp.id}
                       application={activeApp}
                       revision={state.revision}
-                      onSnapshot={setSnapshot}
+                      onSnapshot={receiveSnapshot}
                       onRefresh={refresh}
                     />
                   )}

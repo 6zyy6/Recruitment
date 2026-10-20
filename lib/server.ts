@@ -636,7 +636,17 @@ async function reconcileInterviewDeliveries(
     (item) => item.delivery === "pending" || item.delivery === "unknown",
   ) ?? []) {
     const result = await readReviewEmailDelivery(invitation.id);
-    if (result && result.status !== "sending")
+    if (
+      !result &&
+      invitation.delivery === "pending" &&
+      Date.parse(invitation.createdAt) <= Date.now() - 120_000
+    )
+      current = await saveInterviewDelivery(invitation.id, {
+        status: "unknown",
+        reason:
+          "发送过程已中断且尚无可确认的回执，请先核查 Gmail 已发送邮件，不要重复发送。",
+      });
+    else if (result && result.status !== "sending")
       current = await saveInterviewDelivery(invitation.id, result);
   }
   return current;

@@ -97,14 +97,16 @@ export function getMetrics(state: AppState, filters: Filters = {}) {
   const offerApps = filteredApplications.filter(
     (a) => a.offer.status !== "none" && Date.parse(a.offer.sentAt) <= cutoff,
   );
-  const accepted = offerApps.filter(
-    (a) =>
-      a.offer.status === "accepted" && Date.parse(a.offer.answeredAt) <= cutoff,
-  ).length;
-  const rejected = offerApps.filter(
-    (a) =>
-      a.offer.status === "rejected" && Date.parse(a.offer.answeredAt) <= cutoff,
-  ).length;
+  const offerStatuses = offerApps.map((app) => {
+    if (Date.parse(app.offer.answeredAt) <= cutoff) return app.offer.status;
+    // A later withdrawal overwrites the answer; stage history retains acceptance.
+    return events.some(
+      (event) => event.applicationId === app.id &&
+        event.from === "offer" && event.to === "onboarding",
+    ) ? "accepted" : "sent";
+  });
+  const accepted = offerStatuses.filter((status) => status === "accepted").length;
+  const rejected = offerStatuses.filter((status) => status === "rejected").length;
   const matureInterviews = state.interviews.filter(
     (i) =>
       ids.has(i.applicationId) &&

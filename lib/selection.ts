@@ -81,7 +81,7 @@ export function hasLegacyScreeningApproval(state: AppState, app: Application): b
   if (!app.screeningNote.trim() || app.selection?.hrReview) return false;
   const events = state.events.filter((item) => item.applicationId === app.id);
   if ((app.selection && !events.some((item) => item.type === "advanced" && item.from === "screening" && item.to === "interview")) ||
-    events.some((item) => ["run_screening", "review_resume", "verify_screening_info", "confirm_screening", "configure_screening"].includes(item.type)))
+    events.some((item) => ["run_screening", "review_resume", "verify_screening_info", "confirm_screening", "configure_screening", "anonymized"].includes(item.type)))
     return false;
   const job = state.jobs.find((item) => item.id === app.jobId);
   if (!job) return false;

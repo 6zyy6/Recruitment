@@ -661,7 +661,11 @@ export function applyAction(
           : input
       ) as Input;
       const fields = candidateInput({ ...candidate, ...data });
-      if (duplicateCandidate(state, fields, candidate.id))
+      const changedContacts = {
+        email: fields.email !== candidate.email.toLowerCase() ? fields.email : "",
+        phone: phoneKey(fields.phone) !== phoneKey(candidate.phone) ? fields.phone : "",
+      };
+      if (duplicateCandidate(state, changedContacts, candidate.id))
         fail("DUPLICATE_CANDIDATE", "联系方式与已有候选人重复", 409);
       if (fields.email.toLowerCase() !== candidate.email.toLowerCase()) {
         const appIds = new Set(state.applications
@@ -769,6 +773,8 @@ export function applyAction(
         status: "scheduled",
         notified: false,
       });
+      app.decision = "pending";
+      app.decisionNote = "";
       event(
         app,
         "interview_scheduled",
@@ -825,6 +831,10 @@ export function applyAction(
       if (!["completed", "cancelled", "no_show"].includes(status))
         fail("INVALID_STATUS", "无效的面试结果");
       interview.status = status as Interview["status"];
+      if (app.stage === "interview") {
+        app.decision = "pending";
+        app.decisionNote = "";
+      }
       event(app, "interview_result", "scheduled", status, str(input.note));
       break;
     }
@@ -867,7 +877,7 @@ export function applyAction(
         input.recommendation === undefined
           ? (card?.recommendation ?? "")
           : str(input.recommendation);
-      if (action === "submitScorecard") {
+      if (action === "submitScorecard" && app.stage === "interview") {
         if (interview.status !== "completed")
           fail("INTERVIEW_NOT_COMPLETED", "请先由 HR 确认面试已完成");
         if (
@@ -900,6 +910,10 @@ export function applyAction(
         status: action === "submitScorecard" ? "submitted" : "draft",
         submittedAt: action === "submitScorecard" ? now : "",
       });
+      if (action === "submitScorecard") {
+        app.decision = "pending";
+        app.decisionNote = "";
+      }
       event(
         app,
         action === "submitScorecard"

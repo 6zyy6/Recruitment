@@ -61,6 +61,7 @@ class FakeDatabase {
   updateAttempts = 0;
   writes = 0;
   deliveryConflicts = 0;
+  interruptAfterPendingWrite = false;
   stateReadBarrier?: { reads: number; promise: Promise<void>; release: () => void };
   constructor(state: AppState) { this.state = structuredClone(state); }
   prepare(sql: string) {
@@ -98,6 +99,10 @@ class FakeDatabase {
             this.state = next;
             this.writes++;
             current.order.push(`write:${next.interviewInvitations?.[0]?.delivery}`);
+            if (this.interruptAfterPendingWrite && next.interviewInvitations?.[0]?.delivery === "pending") {
+              this.interruptAfterPendingWrite = false;
+              throw new Error("mock worker interrupted after pending commit");
+            }
             return { meta: { changes: 1 } };
           },
         };
@@ -157,6 +162,14 @@ function hasCode(code: string) {
   return (error: unknown) => Boolean(error && typeof error === "object" && "code" in error && error.code === code);
 }
 type SendResponse = { mailDelivery: MailDelivery; snapshot: { state: AppState } };
+
+async function interruptBeforeMailClaim(harness: Harness) {
+  harness.db.interruptAfterPendingWrite = true;
+  await assert.rejects(interviewInvitationAction(request(), sendInput()), /interrupted after pending commit/);
+  assert.equal(harness.db.state.interviewInvitations![0].delivery, "pending");
+  assert.equal(harness.calls.length, 0);
+  assert.equal(harness.receipts.size, 0);
+}
 
 test("server persists pending with CAS before Gmail and returns its sent receipt with a redacted snapshot", async () => {
   const harness = await setup(), originalRevision = harness.db.state.revision;
@@ -284,5 +297,71 @@ test("unchanged uncertain receipts cause no new writes or audit events on repeat
   assert.equal(harness.db.writes, writes);
   assert.equal(harness.db.state.revision, revision);
   assert.equal(harness.db.state.events.length, events);
+  assert.equal(harness.calls.length, 1);
+});
+
+test("an orphaned pending invitation becomes uncertain at two minutes, stays idempotent and accepts a late receipt without resending", async (context) => {
+  const harness = await setup();
+  await interruptBeforeMailClaim(harness);
+  const createdAt = Date.parse(harness.db.state.interviewInvitations![0].createdAt);
+  let clock = createdAt + 119_999;
+  context.mock.method(Date, "now", () => clock);
+  const before = JSON.stringify(harness.db.state), writes = harness.db.writes;
+  await recruitmentSnapshot(request());
+  assert.equal(JSON.stringify(harness.db.state), before);
+  assert.equal(harness.db.writes, writes);
+
+  clock++;
+  const uncertain = await (await recruitmentSnapshot(request())).json() as { state: AppState };
+  assert.equal(uncertain.state.interviews[0].invitation!.delivery, "unknown");
+  assert.equal(uncertain.state.interviews[0].notified, false);
+  assert.match(uncertain.state.interviews[0].invitation!.deliveryReason!, /尚无可确认的回执.*核查 Gmail.*不要重复发送/);
+  assert.equal(harness.db.writes, writes + 1);
+  const after = JSON.stringify(harness.db.state);
+  await recruitmentSnapshot(request());
+  await recruitmentSnapshot(request());
+  assert.equal(JSON.stringify(harness.db.state), after);
+  assert.equal(harness.db.writes, writes + 1);
+  await assert.rejects(interviewInvitationAction(request(), sendInput(SECOND_ID)), hasCode("INVITATION_EXISTS"));
+  assert.equal(harness.calls.length, 0);
+
+  harness.receipts.set(REQUEST_ID, harness.result);
+  const repaired = await (await recruitmentSnapshot(request())).json() as { state: AppState };
+  assert.equal(repaired.state.interviews[0].invitation!.delivery, "sent");
+  assert.equal(repaired.state.interviews[0].invitation!.providerMessageId, "provider_message_1");
+  assert.equal(repaired.state.interviews[0].notified, true);
+  const sent = JSON.stringify(harness.db.state), sentWrites = harness.db.writes;
+  harness.receipts.delete(REQUEST_ID);
+  clock += 120_000;
+  await recruitmentSnapshot(request());
+  harness.receipts.set(REQUEST_ID, { status: "unknown", reason: "late uncertain result" });
+  await recruitmentSnapshot(request());
+  assert.equal(JSON.stringify(harness.db.state), sent);
+  assert.equal(harness.db.writes, sentWrites);
+  assert.equal(harness.calls.length, 0);
+});
+
+test("revoking an orphaned invitation survives its late receipt and permits only an explicit replacement send", async (context) => {
+  const harness = await setup();
+  await interruptBeforeMailClaim(harness);
+  context.mock.method(Date, "now", () => Date.parse(harness.db.state.interviewInvitations![0].createdAt) + 120_000);
+  await recruitmentSnapshot(request());
+  assert.equal(harness.db.state.interviews[0].invitation!.delivery, "unknown");
+  await interviewInvitationAction(request(), { ...sendInput(), action: "revokeInterviewInvitation" });
+  const revoked = structuredClone(harness.db.state.interviews[0].invitation!);
+  assert.ok(revoked.revokedAt);
+  harness.receipts.set(REQUEST_ID, harness.result);
+  await recruitmentSnapshot(request());
+  assert.equal(harness.db.state.interviewInvitations![0].delivery, "sent");
+  assert.equal(harness.db.state.interviewInvitations![0].revokedAt, revoked.revokedAt);
+  assert.deepEqual(harness.db.state.interviews[0].invitation, revoked);
+  assert.equal(harness.db.state.interviews[0].notified, false);
+  assert.equal(harness.calls.length, 0);
+
+  const replacement = await (await interviewInvitationAction(request(), sendInput(SECOND_ID))).json() as SendResponse;
+  assert.equal(replacement.snapshot.state.interviews[0].invitation!.id, SECOND_ID);
+  assert.equal(replacement.snapshot.state.interviews[0].invitation!.delivery, "sent");
+  await recruitmentSnapshot(request());
+  assert.equal(harness.db.state.interviews[0].invitation!.id, SECOND_ID);
   assert.equal(harness.calls.length, 1);
 });

@@ -2,6 +2,8 @@ import { test } from "node:test";
 import assert from "node:assert/strict";
 import { getMetrics } from "../lib/metrics.ts";
 import { STAGES, type AppState, type Application } from "../lib/domain.ts";
+import { applyAction } from "../lib/engine.ts";
+import { createSeed } from "../lib/seed.ts";
 
 function fixture(): AppState {
   const state = {
@@ -123,4 +125,128 @@ test("feedback denominator excludes immature, cancelled, and no-show interviews"
   assert.equal(metrics.feedbackDue, 2);
   assert.equal(metrics.feedbackTimely, 1);
   assert.equal(metrics.feedbackRate, 0.5);
+});
+
+const OFFER_NOW = new Date("2026-10-19T10:00:00Z");
+function offerMetrics(state: AppState, applicationIds: string[], cutoff?: string) {
+  const metrics = getMetrics({
+    ...state,
+    applications: state.applications.filter((app) => applicationIds.includes(app.id)),
+  }, { cutoff });
+  return {
+    sent: metrics.offerSent,
+    accepted: metrics.offerAccepted,
+    rate: metrics.offerAcceptanceRate,
+  };
+}
+function offerAction(state: AppState, input: Record<string, unknown>, at: string) {
+  return applyAction(state, state.users.find((user) => user.id === "hr")!, {
+    expectedRevision: state.revision,
+    ...input,
+  }, new Date(at));
+}
+
+test("a later withdrawal cannot change an accepted Offer at an earlier cutoff", () => {
+  let state = createSeed(OFFER_NOW);
+  const app = state.applications.find((item) => item.offer.status === "sent" && Date.parse(item.offer.deadline) > OFFER_NOW.getTime())!;
+  state = offerAction(state, {
+    action: "offerResponse", applicationId: app.id, status: "accepted", plannedJoinDate: "2026-10-20",
+  }, OFFER_NOW.toISOString());
+  const cutoff = "2026-10-19T11:00:00Z";
+  const before = offerMetrics(state, [app.id], cutoff);
+  const withdrawn = offerAction(state, {
+    action: "offerResponse", applicationId: app.id, status: "withdrawn", reason: "企业撤回",
+  }, "2026-10-19T12:00:00Z");
+  const reloaded = JSON.parse(JSON.stringify(withdrawn)) as AppState;
+  assert.deepEqual(before, { sent: 1, accepted: 1, rate: 1 });
+  assert.deepEqual(offerMetrics(reloaded, [app.id], cutoff), before);
+  assert.deepEqual(offerMetrics(reloaded, [app.id], "2026-10-19T12:00:00Z"), {
+    sent: 1, accepted: 0, rate: null,
+  });
+});
+
+test("closing an accepted application preserves its earlier Offer answer without reading audit notes", () => {
+  let state = createSeed(OFFER_NOW);
+  const app = state.applications.find((item) => item.offer.status === "sent" && Date.parse(item.offer.deadline) > OFFER_NOW.getTime())!;
+  state = offerAction(state, {
+    action: "offerResponse", applicationId: app.id, status: "accepted", plannedJoinDate: "2026-10-20",
+  }, OFFER_NOW.toISOString());
+  const closed = offerAction(state, {
+    action: "closeApplication", applicationId: app.id, reason: "线下确认结束流程", outcome: "withdrawn",
+  }, "2026-10-19T12:00:00Z");
+  closed.events.forEach((event) => { event.note = "已清理"; });
+  assert.deepEqual(offerMetrics(closed, [app.id], "2026-10-19T11:00:00Z"), {
+    sent: 1, accepted: 1, rate: 1,
+  });
+  assert.deepEqual(offerMetrics(closed, [app.id], "2026-10-19T13:00:00Z"), {
+    sent: 1, accepted: 0, rate: null,
+  });
+});
+
+test("Offer rejection affects the answered denominator while expiry and withdrawal do not", () => {
+  let state = createSeed(OFFER_NOW);
+  const accepted = state.applications.find((app) => app.offer.status === "accepted")!;
+  const pending = state.applications.filter((app) => app.offer.status === "sent").slice(0, 3);
+  const ids = [accepted.id, ...pending.map((app) => app.id)];
+  const answeredAt = "2026-10-26T10:00:00Z";
+  for (const [index, status] of ["rejected", "expired", "withdrawn"].entries()) {
+    state = offerAction(state, {
+      action: "offerResponse", applicationId: pending[index].id, status, reason: "线下答复登记",
+    }, answeredAt);
+  }
+  assert.deepEqual(offerMetrics(state, ids, "2026-10-25T10:00:00Z"), {
+    sent: 4, accepted: 1, rate: 1,
+  });
+  assert.deepEqual(offerMetrics(state, ids, answeredAt), {
+    sent: 4, accepted: 1, rate: 0.5,
+  });
+});
+
+test("the default current cutoff keeps terminal Offer results out of accepted counts", () => {
+  const now = Date.now();
+  let state = createSeed(new Date(now - 10 * 86400000));
+  const accepted = state.applications.find((app) => app.offer.status === "accepted")!;
+  const pending = state.applications.filter((app) => app.offer.status === "sent").slice(0, 3);
+  for (const [index, status] of ["rejected", "expired", "withdrawn"].entries()) {
+    state = offerAction(state, {
+      action: "offerResponse", applicationId: pending[index].id, status,
+    }, new Date(now - 3600000).toISOString());
+  }
+  assert.deepEqual(offerMetrics(state, [accepted.id, ...pending.map((app) => app.id)]), {
+    sent: 4, accepted: 1, rate: 0.5,
+  });
+});
+
+test("legacy seed stage events and Offer snapshots retain their existing statistics", () => {
+  const state = createSeed(OFFER_NOW);
+  const app = state.applications.find((item) => item.offer.status === "accepted")!;
+  assert.ok(!state.events.some((event) => event.applicationId === app.id && event.type === "offer_response"));
+  const beforeAnswer = new Date(Date.parse(app.offer.answeredAt) - 1).toISOString();
+  assert.deepEqual(offerMetrics(state, [app.id], beforeAnswer), {
+    sent: 1, accepted: 0, rate: null,
+  });
+  assert.deepEqual(offerMetrics(state, [app.id], app.offer.answeredAt), {
+    sent: 1, accepted: 1, rate: 1,
+  });
+  assert.deepEqual(offerMetrics({ ...state, events: [] }, [app.id], app.offer.answeredAt), {
+    sent: 1, accepted: 1, rate: 1,
+  });
+  const offers = state.applications.filter((item) => item.offer.status !== "none");
+  assert.deepEqual(offerMetrics(state, offers.map((item) => item.id), OFFER_NOW.toISOString()), {
+    sent: offers.length,
+    accepted: offers.filter((item) => item.offer.status === "accepted").length,
+    rate: 1,
+  });
+});
+
+test("missing legacy acceptance history does not invent an earlier accepted answer", () => {
+  const state = createSeed(OFFER_NOW);
+  const app = state.applications.find((item) => item.offer.status === "accepted" && item.status === "active")!;
+  const withdrawn = offerAction(state, {
+    action: "offerResponse", applicationId: app.id, status: "withdrawn", reason: "企业撤回",
+  }, "2026-10-19T12:00:00Z");
+  withdrawn.events = withdrawn.events.filter((event) => event.applicationId !== app.id || event.to !== "onboarding");
+  assert.deepEqual(offerMetrics(withdrawn, [app.id], "2026-10-19T11:00:00Z"), {
+    sent: 1, accepted: 0, rate: null,
+  });
 });
